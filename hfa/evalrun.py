@@ -29,7 +29,7 @@ from typing import Iterable, Optional
 from .fetcher import FixtureFetcher, LiveFetcher
 from .models import EvidenceState, KillClass, Verdict
 from .pipeline import decide_from_proposal
-from .proposer.base import Proposer
+from .proposer.base import Proposer, visible_reason
 from .proposer.prompt import prompt_sha256
 from . import holdout as holdout_mod
 from .normalize import norm
@@ -143,7 +143,11 @@ def run_case(case: dict, proposer: Proposer, fetcher) -> dict:
     res = decide_from_proposal(pr, fetcher, case["input"])
     d = res.decision
     row["verifier"] = to_label(d.final, d.kill_class, d.evidence)
-    row["reasons"] = [f"{e.claim_id}:{e.state.value}:{e.reason_code.value}" for e in d.evidence]
+    claims = {c.claim_id: c for c in d.claims}
+    shown = [(e, *visible_reason(claims.get(e.claim_id), e)) for e in d.evidence]
+    row["reasons"] = [f"{e.claim_id}:{e.state.value}:{cat}" for e, _, cat in shown]
+    row["reason_texts"] = {e.claim_id: text for e, text, _ in shown}
+    row["reason_categories"] = dict(Counter(cat for e, _, cat in shown if e.state.value != "VERIFIED"))
     row["gate_log"] = d.gate_log
     return row
 
@@ -175,6 +179,12 @@ def aggregate(rows: list[dict]) -> dict:
             "labels": dict(Counter(r[cond] for r in ok)),
         }
     out["n_non_go"], out["n_go"] = len(non_go), len(go)
+    # Non-VERIFIED evidence by visible category; quote_outside_context is its
+    # own category (never counted as QUOTE_TOO_SHORT).
+    cats: Counter = Counter()
+    for r in ok:
+        cats.update(r.get("reason_categories") or {})
+    out["evidence_categories"] = dict(sorted(cats.items()))
     return out
 
 
@@ -206,6 +216,8 @@ def format_table(rows: Iterable[dict], summary: dict) -> str:
                      f"rate={s['false_go_rate']} false_KILL={s['false_kill_count']}/{summary['n_go']} "
                      f"deferral={s['deferral_rate']} exact={s['exact_label_agreement']}/{summary['n_ok']}")
         lines.append(f"{'':12} KILL<->REFUSE mix-ups={s['kill_refuse_mixups']} (not false GO; reported separately)")
+    if summary.get("evidence_categories") is not None:
+        lines.append(f"non-VERIFIED evidence by category: {summary['evidence_categories']}")
     return "\n".join(lines)
 
 

@@ -95,6 +95,44 @@ class ContextTests(unittest.TestCase):
         ctx = p.last_context[0]
         self.assertEqual((ctx["truncated"], ctx["original_chars"] > SOURCE_TEXT_LIMIT), (True, True))
 
+    def _cut_off_setup(self):
+        head = ("Section text without the rule. " * 500)[:SOURCE_TEXT_LIMIT + 500]
+        long_text = head + " " + RULE + " " + FILLER
+        return long_text, page("", visible=long_text)
+
+    def test_card_trace_and_eval_show_the_proposer_reason(self):
+        from hfa import demo, evalrun
+        from hfa.proposer.base import OUTSIDE_CONTEXT_REASON
+        long_text, doc = self._cut_off_setup()
+        _, _, res = self._run([RULE], long_text, doc)
+        r = demo.card(res)["receipts"][0]
+        self.assertEqual(r["reason"], "quote outside the text given to the model (verifier code: QUOTE_TOO_SHORT)")
+        self.assertEqual((r["reason_category"], r["verifier_reason_code"]), ("quote_outside_context", "QUOTE_TOO_SHORT"))
+        self.assertEqual(r["quote"], RULE)                      # the original quote stays visible
+        with open(self.log) as f:
+            ev = [json.loads(x) for x in f if "quote_outside_context" in x]
+        self.assertEqual(ev[0]["reason"], OUTSIDE_CONTEXT_REASON)
+        # eval row + summary: own category, never counted as QUOTE_TOO_SHORT
+        case = {"id": "X9", "gold": "NEEDS_HUMAN", "input": "job",
+                "claims": [{"quote": RULE, "role": "SUPPORTS", "url": URL}]}
+        p = Proposer(ScriptedProvider([RULE]), self.budget, source_text=lambda u: long_text)
+        row = evalrun.run_case(case, p, StaticFetcher(doc))
+        self.assertEqual(row["reasons"], ["c0:UNVERIFIED:quote_outside_context"])
+        self.assertEqual(row["reason_texts"]["c0"], OUTSIDE_CONTEXT_REASON)
+        summary = evalrun.aggregate([row])
+        self.assertEqual(summary["evidence_categories"], {"quote_outside_context": 1})
+        self.assertNotIn("QUOTE_TOO_SHORT", summary["evidence_categories"])
+        self.assertIn("quote_outside_context", evalrun.format_table([row], summary))
+
+    def test_genuinely_short_quote_keeps_its_own_category(self):
+        from hfa import evalrun
+        doc = page(RULE)
+        case = {"id": "X8", "gold": "UNVERIFIED", "input": "job",
+                "claims": [{"quote": "short", "role": "SUPPORTS", "url": URL}]}
+        p = Proposer(ScriptedProvider(["30 days"]), self.budget, source_text=lambda u: doc.visible)
+        row = evalrun.run_case(case, p, StaticFetcher(doc))
+        self.assertEqual(row["reason_categories"], {"QUOTE_TOO_SHORT": 1})
+
     def test_frozen_code_untouched(self):
         here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         with open(os.path.join(here, "data", "eval", "FREEZE_GATE.json")) as f:

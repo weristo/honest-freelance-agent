@@ -17,6 +17,18 @@ from ..normalize import norm
 from .prompt import SOURCE_TEXT_LIMIT, SYSTEM_PROMPT, prompt_sha256, render_user
 
 OUTSIDE_CONTEXT_MARK = "[quote outside the text given to the model] "
+OUTSIDE_CONTEXT_REASON = "quote outside the text given to the model (verifier code: QUOTE_TOO_SHORT)"
+OUTSIDE_CONTEXT_CATEGORY = "quote_outside_context"
+
+
+def visible_reason(claim, evidence) -> tuple[str, str]:
+    """(text shown to people, category for counting) for one claim's evidence.
+    A claim marked by mark_outside_context() is shown with the proposer-layer
+    reason, not with the frozen verifier's QUOTE_TOO_SHORT."""
+    code = evidence.reason_code.value
+    if claim is not None and claim.text.startswith(OUTSIDE_CONTEXT_MARK) and code == "QUOTE_TOO_SHORT":
+        return OUTSIDE_CONTEXT_REASON, OUTSIDE_CONTEXT_CATEGORY
+    return code, code
 
 
 @dataclass
@@ -204,7 +216,8 @@ class Proposer:
         outside = mark_outside_context(claims, texts)
         self.last_outside = outside
         if outside:
-            self._log({"llm": label, "event": "quote_outside_context", "claims": outside,
-                       "effect": "quote removed before verification -> UNVERIFIED (QUOTE_TOO_SHORT)"})
+            self._log({"llm": label, "event": OUTSIDE_CONTEXT_CATEGORY, "claims": outside,
+                       "reason": OUTSIDE_CONTEXT_REASON,
+                       "effect": "quote removed before verification -> UNVERIFIED"})
         return ProposerResult("ok", label, ph, verdict, kill, why, claims, cost_usd=cost, usage=usage,
                               context=context, outside_context=outside)

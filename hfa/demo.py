@@ -30,7 +30,7 @@ from .fetcher import LiveFetcher, SourceDoc, doc_from_bytes
 from .normalize import norm
 from .paypal.client import SandboxClient, build_invoice, invoice_for_decision
 from .pipeline import RunResult, run
-from .proposer.base import Proposer
+from .proposer.base import OUTSIDE_CONTEXT_MARK, Proposer, visible_reason
 from .proposer.budget import Budget
 from .proposer.keys import KEY_NAMES, key_file_path
 from .proposer.providers import MockClient, client_from_env
@@ -157,12 +157,16 @@ def card(res: RunResult) -> dict:
         receipts = []
         for e in d.evidence:
             c = claims.get(e.claim_id)
+            reason, category = visible_reason(c, e)
+            outside = category == "quote_outside_context"
             receipts.append({
                 "claim": e.claim_id, "kind": c.kind.value if c else None,
-                "quote": c.quote if c else None, "text": c.text if c else None,
+                "quote": (c.text[len(OUTSIDE_CONTEXT_MARK):] if outside else c.quote) if c else None,
+                "text": c.text if c else None, "reason_category": category,
+                "verifier_reason_code": e.reason_code.value,
                 "source_url": c.source_url if c else None,
                 "user_confirmed": c.user_confirmed if c else None,
-                "state": e.state.value, "reason": e.reason_code.value, "layer": e.match_layer,
+                "state": e.state.value, "reason": reason, "layer": e.match_layer,
                 "source_sha256": e.raw_sha256, "snippet_sha256": e.snippet_sha256,
                 "fetched_at": e.fetched_at, "nearest_span": e.nearest_span,
                 "source_date": e.source_date, "date_flag": e.date_flag, "guard_hits": e.guard_hits})
