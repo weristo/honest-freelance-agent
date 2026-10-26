@@ -40,6 +40,10 @@ every case flagged as a false-GO trap). They test the wiring, not a model.
 | E13 | 2026-10-26 | prompt | Proposer prompt p1 -> p2: CALC instructions and `calc` in the output schema. Prompt hash now `b893d3422d6a...`. | Needed for E9. | No results exist for any real model; prompt freeze still pending. |
 | E14 | 2026-10-26 | code (eval) | Freeze split into two final steps (`--freeze gate`, `--freeze prompt`); the frozen decision code now includes `calc.py`. The holdout needs both. Prepared, not run. | Coordinator decision (002). | No. |
 | E15 | 2026-10-26 | repo hygiene | `.gitignore` covers `eval_snapshots/` anywhere and `data/private/`; public holdout file committed with both hashes recorded above. | Coordinator decision (002). | No. |
+| E16 | 2026-10-26 | acceptance | 002 accepted the prompt change p1 -> p2 (E13) and the new NOT_WORTH demo scenario (mock demo: 30 USD job, 8% fee, own cost 29 USD -> net 27.60 -> KILL although the mock said GO). | Recorded on 002's request. | n/a |
+| E17 | 2026-10-26 | code (gate) | **G6 narrowed** (rule clarification after seeing the mock): it fires only if the decision rests on the user's own amount or threshold, i.e. the request text states a money amount, or a critical USER_ATTESTED claim carries a number. A percentage that appears only in a source quote (e.g. "100%") no longer triggers it. The gate now receives the request text. No CALC coding was added to any case. | Coordinator decision (002). | **Yes: "szabálypontosítás a mock láttán" (rule clarification after seeing the mock).** Effect: T31 is GO again (no amount in its request); T35 stays deferred (23 000 / 60 000 EUR in the request -> a real proposer must supply a CALC). |
+| E18 | 2026-10-26 | code (verifier, new module `hfa/dates.py`) | **General source-date detection** for legal / tax sources (registry tax/legislation domains, or `source_domain_type: legal`): date = latest of HTTP Last-Modified, a year segment in the URL path (also in a query value that is a path), and dates in the text (hu/de/en formats, e.g. "2025. január 1.", "Stand: 03/2024", "Effective date: March 5, 2024", "12-Aug-2025"). Older than 365 days -> STALE_SOURCE (NEEDS_HUMAN) at claim level, so G1 cannot fire on it. No date -> VERIFIED with `date_flag: UNDATED` (yellow label). Replaces the old "latest YYYY.MM.DD in the visible text" rule. Not specific to any case. | Coordinator decision (002). | Yes (round 3: T36 REFUSE vs gold NEEDS_HUMAN). Effect: T36 -> NEEDS_HUMAN via STALE_SOURCE (latest text date 2022-12-15); T36 gold unchanged (NEEDS_HUMAN). |
+| E19 | 2026-10-26 | code (eval) | The frozen decision-code hash now also covers `dates.py`. | Follows E18. | No. |
 
 ## Mock results by stage (dev set, 40 cases, MOCK - not a model measurement)
 
@@ -49,14 +53,16 @@ every case flagged as a false-GO trap). They test the wiring, not a model.
 | Round 1 final (E1, E2) | 0/35 | 0/5 | 5/23 | 6 | 24/40 |
 | Round 2 (E3-E8) | **1/35** (T16) | 0/5 | 3/24 | 2 | 31/40 |
 | Round 3 (E9-E15) | 0/35 | 0/5 | 6/24 | 0 | 31/40 |
+| Round 4 (E16-E19) | 0/35 | 0/5 | 5/24 | 0 | 33/40 |
 
 Without the verifier the same mock gives 32/35 false GO in every stage.
 The round-2 rise from 0 to 1 false GO is kept on purpose and reported: the
 earlier 0 depended on a guard word that happened to be near the T16 quote.
 
-Round 3 deferrals of gold-GO cases: T01, T04 (guard word in the next
-sentence), T31, T35 (G6: amount without CALC). T16 is now KILL (NOT_WORTH)
-via CALC, T21 KILL (NOT_WORTH) via CALC, T30 NEEDS_HUMAN via INFERENCE.
+Round 4 deferrals of gold-GO cases: T01, T04 (guard word in the next
+sentence), T35 (G6: the user's amounts need a CALC). T31 is GO; T36 is
+NEEDS_HUMAN (STALE_SOURCE). Other deferrals: T25 (REDIRECTED), T30
+(INFERENCE).
 
 Fingerprint at the time of writing (not a freeze): prompt
-`b893d3422d6a...`, decision code `4f269115d665...`.
+`b893d3422d6a...`, decision code `ae438bfcb003...`.

@@ -30,6 +30,12 @@ def _host(url: str) -> str:
     return (urllib.parse.urlsplit(url).hostname or "").lower().rstrip(".")
 
 
+def is_policy_domain(url: str) -> bool:
+    """Tax-authority / legislation host (the dated, legal part of the registry)."""
+    host = _host(url) if url else ""
+    return any(host == d or host.endswith("." + d) for d in POLICY_DOMAINS)
+
+
 def is_policy_source(url: str) -> bool:
     if not url:
         return False

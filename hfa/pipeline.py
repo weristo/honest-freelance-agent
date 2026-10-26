@@ -41,19 +41,20 @@ def write_trace(path: str, steps: list[dict]) -> None:
             f.write(redact(json.dumps(s, ensure_ascii=False, default=str)) + "\n")
 
 
-def decide_from_proposal(pr: ProposerResult, fetcher: Fetcher) -> RunResult:
+def decide_from_proposal(pr: ProposerResult, fetcher: Fetcher, request: Optional[str] = None) -> RunResult:
     if pr.status != "ok":
         return RunResult(pr.status, pr.llm, pr.prompt_sha256, None, pr.message)
     evidence = [verify(c, fetcher) for c in pr.claims]
     evidence = find_contradictions(pr.claims, evidence)
-    d = decide(pr.decision or Verdict.NEEDS_HUMAN, pr.claims, evidence, pr.llm, pr.kill_class)
+    d = decide(pr.decision or Verdict.NEEDS_HUMAN, pr.claims, evidence, pr.llm, pr.kill_class,
+               request_text=request)
     return RunResult("ok", pr.llm, pr.prompt_sha256, d)
 
 
 def run(request: str, sources: list[str], proposer: Proposer, fetcher: Fetcher,
         trace_path: Optional[str] = None) -> RunResult:
     pr = proposer.propose(request, sources)
-    res = decide_from_proposal(pr, fetcher)
+    res = decide_from_proposal(pr, fetcher, request)
     if trace_path:
         t = utcnow_iso()
         steps = [{"t": t, "actor": "proposer", "llm": pr.llm, "status": pr.status,

@@ -138,7 +138,7 @@ def run_case(case: dict, proposer: Proposer, fetcher) -> dict:
         return row
     proposed = pr.decision
     row["no_verifier"] = to_label(proposed, pr.kill_class, [])
-    res = decide_from_proposal(pr, fetcher)
+    res = decide_from_proposal(pr, fetcher, case["input"])
     d = res.decision
     row["verifier"] = to_label(d.final, d.kill_class, d.evidence)
     row["reasons"] = [f"{e.claim_id}:{e.state.value}:{e.reason_code.value}" for e in d.evidence]

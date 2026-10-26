@@ -19,7 +19,9 @@ NEEDS_HUMAN and a reason code. Order of checks (first hit wins):
                                        different amounts; else VERIFIED
                                        MULTI_CONSISTENT (all snippets kept)
   redirected to another domain      -> NEEDS_HUMAN REDIRECTED
-  legal source older than 365 days  -> NEEDS_HUMAN STALE_SOURCE
+  legal/tax source older than 365   -> NEEDS_HUMAN STALE_SOURCE (date: see
+                                       hfa/dates.py; none found -> VERIFIED
+                                       with date_flag UNDATED)
   guard word near a SUPPORTS quote  -> NEEDS_HUMAN AMBIGUOUS_CONTEXT
                                        ("near" = the quote's sentence + the
                                        next sentence; words inside the quote
@@ -42,7 +44,9 @@ from typing import Iterable, Optional
 from .extract import BLOCK_PATTERNS, LOGIN_PATH_MARKERS, SOFT_404_PATTERNS
 from .fetcher import Fetcher, SourceDoc, utcnow_iso
 from .models import Claim, ClaimKind, Evidence, EvidenceState, Polarity, Reason
+from .dates import source_date as find_source_date
 from .normalize import fold_with_map, norm
+from .registry import is_policy_domain
 
 MIN_QUOTE_CHARS = 20
 THIN_CONTENT_CHARS = 2000
@@ -57,7 +61,6 @@ GUARD_WORDS = [
     "ausgenommen", "nicht",
 ]
 _GUARD_RES = [re.compile(r"(?<!\w)" + re.escape(w) + r"(?!\w)") for w in GUARD_WORDS]
-_DATE_RE = re.compile(r"(?<!\d)(20\d\d)[.\-/](0[1-9]|1[0-2])[.\-/](0[1-9]|[12]\d|3[01])(?!\d)")
 
 LAYERS = ("visible", "embedded")
 
@@ -94,16 +97,6 @@ def _parse_iso(ts: Optional[str]) -> datetime:
         except ValueError:
             pass
     return datetime.now(timezone.utc)
-
-
-def latest_date_in(text: str) -> Optional[str]:
-    """Most recent numeric date (YYYY.MM.DD / YYYY-MM-DD / YYYY/MM/DD) in text."""
-    best = None
-    for y, m, d in _DATE_RE.findall(text):
-        cand = f"{y}-{m}-{d}"
-        if best is None or cand > best:
-            best = cand
-    return best
 
 
 def _blocked(doc: SourceDoc) -> Optional[str]:
@@ -239,15 +232,21 @@ def verify(claim: Claim, fetcher: Fetcher, now: Optional[datetime] = None) -> Ev
         return ev(EvidenceState.NEEDS_HUMAN, Reason.REDIRECTED,
                   detail=f"redirected to {_host(doc.final_url)}", **ok)
 
-    if claim.source_domain_type == "legal":
-        src_date = latest_date_in(layers["visible"])
+    if claim.source_domain_type == "legal" or is_policy_domain(claim.source_url):
+        # Legal / tax source: date = latest of Last-Modified, URL year, text dates.
+        src_date, origins = find_source_date(layers["visible"] + " " + layers["embedded"],
+                                             [claim.source_url, doc.final_url or ""], doc.last_modified)
+        ok["date_origins"] = sorted(set(origins))[-10:]
         if src_date:
             ref = now or _parse_iso(doc.fetched_at)
             age = (ref - datetime.strptime(src_date, "%Y-%m-%d").replace(tzinfo=timezone.utc)).days
             if age > STALE_DAYS:
                 return ev(EvidenceState.NEEDS_HUMAN, Reason.STALE_SOURCE, source_date=src_date,
+                          date_flag="DATED",
                           detail=f"source dated {src_date} ({age} days old) - may be outdated", **ok)
-            ok["source_date"] = src_date
+            ok["source_date"], ok["date_flag"] = src_date, "DATED"
+        else:
+            ok["date_flag"] = "UNDATED"
 
     guard_hits = _guard_hits(layers[layer], s, e)
     if guard_hits and claim.polarity == Polarity.SUPPORTS:
@@ -255,7 +254,9 @@ def verify(claim: Claim, fetcher: Fetcher, now: Optional[datetime] = None) -> Ev
                   detail="words near the quote may narrow or reverse it (heuristic)", **ok)
 
     detail = "; ".join(x for x in (multi_detail,
-                                   "found in page data (collapsed section)" if layer == "embedded" else "") if x)
+                                   "found in page data (collapsed section)" if layer == "embedded" else "",
+                                   "UNDATED legal/tax source: no date found - check it is current"
+                                   if ok.get("date_flag") == "UNDATED" else "") if x)
     reason = Reason.MULTI_CONSISTENT if multi_detail else Reason.EXACT_MATCH
     return ev(EvidenceState.VERIFIED, reason, guard_hits=guard_hits, detail=detail, **ok)
 

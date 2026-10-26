@@ -35,7 +35,7 @@ RUN_LOCK_PATH = os.path.join("data", "eval", "HOLDOUT_RUN.json")
 
 # Source files whose behaviour decides the verdict. Their combined hash is frozen.
 DECISION_MODULES = ("normalize.py", "extract.py", "fetcher.py", "verifier.py",
-                    "registry.py", "calc.py", "gate.py", "pipeline.py")
+                    "registry.py", "calc.py", "dates.py", "gate.py", "pipeline.py")
 
 
 class HoldoutLocked(PermissionError):

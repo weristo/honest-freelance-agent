@@ -137,6 +137,7 @@ def card(res: RunResult) -> dict:
                    receipts=[{"claim": e.claim_id, "state": e.state.value, "reason": e.reason_code.value,
                               "layer": e.match_layer, "snippet_sha256": (e.snippet_sha256 or "")[:12],
                               "fetched_at": e.fetched_at, "nearest_span": e.nearest_span,
+                              "source_date": e.source_date, "date_flag": e.date_flag,
                               "guard_hits": e.guard_hits} for e in d.evidence])
     return out
 

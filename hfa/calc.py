@@ -56,6 +56,20 @@ def has_amount(text: str) -> bool:
     return any(rx.search(text or "") for rx in _AMOUNT)
 
 
+_MONEY = [re.compile(r"[$€£]\s?\d"), re.compile(r"\d\s?[$€£]"),
+          re.compile(r"(?i)\d[\d.,\s]*\s?(?:m\s?)?(?:usd|eur|euro|gbp|huf|ft|forint|dollars?)(?!\w)")]
+_DIGIT = re.compile(r"\d")
+
+
+def has_money(text: str) -> bool:
+    """Does the text state a money amount? (Percentages alone do not count.)"""
+    return any(rx.search(text or "") for rx in _MONEY)
+
+
+def has_number(text: str) -> bool:
+    return bool(_DIGIT.search(text or ""))
+
+
 def tokenize(expr: str) -> list[tuple[str, str]]:
     if not isinstance(expr, str):
         raise CalcError("expression must be a string")

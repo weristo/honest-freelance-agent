@@ -105,6 +105,8 @@ class Evidence:
     http_status: Optional[int] = None
     final_url: Optional[str] = None
     source_date: Optional[str] = None
+    date_flag: Optional[str] = None      # policy sources: "DATED" | "UNDATED"
+    date_origins: list[str] = field(default_factory=list)
     nearest_span: Optional[str] = None   # display only; never raises the state
     detail: str = ""
     verifier_version: str = VERIFIER_VERSION
@@ -128,6 +130,7 @@ class Decision:
     evidence: list[Evidence] = field(default_factory=list)
     claims: list[Claim] = field(default_factory=list)
     calcs: list[dict] = field(default_factory=list)
+    request_text: Optional[str] = None
 
     def to_dict(self) -> dict[str, Any]:
         return {

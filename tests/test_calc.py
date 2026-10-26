@@ -163,13 +163,25 @@ class CalcGateTests(unittest.TestCase):
         self.assertEqual(d.final, V.GO)
         require_verified_go(d)
 
-    def test_go_on_amount_without_calc_needs_human(self):
-        d = decide(V.GO, [fact(FEE, cid="c1")], [Evidence("c1", S.VERIFIED, R.EXACT_MATCH)], "mock")
+    def test_g6_quote_percentage_alone_does_not_trigger(self):
+        d = decide(V.GO, [fact(FEE, cid="c1")], [Evidence("c1", S.VERIFIED, R.EXACT_MATCH)], "mock",
+                   request_text="Can I use this platform?")
+        self.assertEqual(d.final, V.GO)
+
+    def test_g6_money_in_request_without_calc_needs_human(self):
+        d = decide(V.GO, [fact(FEE, cid="c1")], [Evidence("c1", S.VERIFIED, R.EXACT_MATCH)], "mock",
+                   request_text="A 30 USD logo job. Take it?")
         self.assertEqual(d.final, V.NEEDS_HUMAN)
         self.assertTrue(any(g.startswith("G6 fail") for g in d.gate_log))
         d.final = V.GO                                   # tampering does not help
         with self.assertRaises(GoNotAllowed):
             require_verified_go(d)
+
+    def test_g6_user_number_without_calc_needs_human(self):
+        u = Claim("u1", "Last year's turnover was 23 000 EUR.", kind=ClaimKind.USER_ATTESTED, user_confirmed=True)
+        d = decide(V.GO, [fact(cid="c1"), u], [Evidence("c1", S.VERIFIED, R.EXACT_MATCH),
+                                               Evidence("u1", S.NOT_APPLICABLE, R.NOT_A_FACT)], "mock")
+        self.assertEqual(d.final, V.NEEDS_HUMAN)
 
     def test_go_without_amount_needs_no_calc(self):
         d = decide(V.GO, [fact(cid="c1")], [Evidence("c1", S.VERIFIED, R.EXACT_MATCH)], "mock")

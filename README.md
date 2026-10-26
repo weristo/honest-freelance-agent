@@ -59,7 +59,8 @@ the proposer said GO. **G1** a verified critical fact that contradicts the plan 
 **G3** any critical NEEDS_HUMAN, or a decision resting on an INFERENCE ->
 NEEDS_HUMAN. **G4** any critical UNVERIFIED -> no GO. **G5** facts only the
 user knows (USER_ATTESTED) are never VERIFIED and need an explicit tick.
-**G6** a GO that rests on a money amount or percentage needs a passing CALC.
+**G6** a GO that rests on the user's own amounts or thresholds (a money
+amount in the request, or a USER_ATTESTED number) needs a passing CALC.
 
 ### CALC: the code does the sums
 A CALC claim names a formula and its inputs, e.g. `fee = max(rate * price,
@@ -80,8 +81,9 @@ Reason codes: `EXACT_MATCH`, `NO_MATCH`, `QUOTE_TOO_SHORT`, `URL_REFUSED`,
 never bypassed), `SOFT_404`, `THIN_CONTENT` (JS-only page), `MULTI_MATCH`
 (several places, and one of them has a guard word or the places show
 different amounts), `MULTI_CONSISTENT` (several places that agree: VERIFIED,
-all snippets kept), `REDIRECTED` (other domain), `STALE_SOURCE` (legal page
-older than 365 days), `AMBIGUOUS_CONTEXT` (a guard word such as "except",
+all snippets kept), `REDIRECTED` (other domain), `STALE_SOURCE` (legal / tax
+source whose latest date - Last-Modified, URL year or a date in the text - is
+older than 365 days; no date at all gives VERIFIED with `date_flag: UNDATED`), `AMBIGUOUS_CONTEXT` (a guard word such as "except",
 "not", "employer" in the sentence of a supporting quote or the sentence right
 after it; words inside the quote do not count), `CONTRADICTED`,
 `SOURCE_CHANGED`.
@@ -106,7 +108,7 @@ Python 3.11+ and nothing else for the core (standard library only).
 
 ```bash
 git clone <this repo> && cd honest-freelance-agent
-python3 -m unittest discover -s tests -t .      # 109 tests, offline, no keys
+python3 -m unittest discover -s tests -t .      # 122 tests, offline, no keys (1 skipped without the private snapshots)
 ```
 
 ## Run
@@ -208,19 +210,18 @@ seeing mock results.
 
 Current numbers are **mock only** (a stand-in that says GO on every trap
 case), dev set: without verifier 32/35 false GO; with verifier + gate + CALC
-0/35, false KILL 0/5, deferral 6/24, KILL<->REFUSE mix-ups 0. Four of the
-five gold-GO cases are deferred (guard words, or an amount without a CALC).
+0/35, false KILL 0/5, deferral 5/24, KILL<->REFUSE mix-ups 0. Three of the
+five gold-GO cases are deferred (guard words; T35 needs a CALC that a real
+proposer has to supply).
 This shows that the pipeline wiring works; it says nothing about any real
 model. The history of every change, including the ones made after looking
 at mock numbers, is in EVAL_CHANGELOG.md.
 
-## Limitations (honest list)
+## Known limitations
 
 - A string match proves the sentence is on the page, not that the page is
   right or that the conclusion drawn from it is right.
-- Guard words, soft-404 / captcha patterns and the "legal page older than
-  365 days" rule are heuristics, and the date heuristic takes the latest
-  date on the page.
+- Guard words and soft-404 / captcha patterns are heuristics.
 - No headless browser: JS-only pages end as `THIN_CONTENT`. No OCR, no PDF
   layer yet.
 - The domain check uses the last two host labels (no public suffix list).
@@ -233,8 +234,15 @@ at mock numbers, is in EVAL_CHANGELOG.md.
 - CALC checks the sums, not the formula: a wrong reading of a fee rule gives
   a correctly computed wrong answer. Literal parsing handles common formats
   (`10%`, `$5.00`, `3,40%`, `25 000`) but not words ("twenty").
-- The "GO rests on an amount" test (G6) looks for currency signs, codes and
-  percentages in the supporting quotes; an amount written in words slips by.
+- amounts written in words are not detected by G6
+- G6 fires when the request states a money amount or a USER_ATTESTED claim
+  carries a number; a percentage that appears only in a source quote does
+  not trigger it.
+- Source dates for legal / tax sources (the latest of HTTP Last-Modified, a
+  year in the URL path, and dates found in the text) are a heuristic: an old
+  date quoted on a current page can look current only if a newer date is
+  also present, and a page with no date at all is shown as UNDATED (still
+  VERIFIED, with a yellow label), not as stale.
 
 ## License
 

@@ -2,8 +2,8 @@
 
 Order: C0 (CALC claims: invalid or mismatching arithmetic -> NEEDS_HUMAN; a
 failed check -> KILL with the CALC's kill class, before G1 and without
-consulting the source registry), then G1-G5, then G6 (a GO that rests on a
-money amount or percentage needs a passing CALC).
+consulting the source registry), then G1-G5, then G6 (a GO that rests on the
+user's own amounts or thresholds needs a passing CALC).
 
 The proposer (LLM) only *proposes* GO/KILL/NEEDS_HUMAN. The final verdict is
 computed here from the claim list and the verifier's evidence. Any action
@@ -16,7 +16,7 @@ from __future__ import annotations
 import uuid
 from typing import Optional
 
-from .calc import has_amount, run_calc
+from .calc import has_money, has_number, run_calc
 from .registry import is_policy_source, policy_reason
 from .models import (Claim, ClaimKind, Decision, Evidence, EvidenceState,
                      KillClass, Polarity, Verdict)
@@ -35,11 +35,13 @@ def _calcs(claims, ev):
     return [run_calc(c, by_id, ev) for c in claims if c.critical and c.kind == ClaimKind.CALC]
 
 
-def _amount_based(claims) -> bool:
-    return any(c.critical and c.polarity == Polarity.SUPPORTS and
-               ((c.kind == ClaimKind.FACT and has_amount(c.quote)) or
-                (c.kind == ClaimKind.USER_ATTESTED and has_amount(c.text)))
-               for c in claims)
+def _amount_based(claims, request_text: Optional[str]) -> bool:
+    """G6 trigger: the decision rests on the USER's numbers - a USER_ATTESTED
+    claim with a numeric value, or a money amount in the request itself.
+    A percentage inside a source quote alone does not trigger it."""
+    if has_money(request_text or ""):
+        return True
+    return any(c.critical and c.kind == ClaimKind.USER_ATTESTED and has_number(c.text) for c in claims)
 
 
 def _no_llm_refusal(kc: Optional[KillClass]) -> Optional[KillClass]:
@@ -49,7 +51,7 @@ def _no_llm_refusal(kc: Optional[KillClass]) -> Optional[KillClass]:
 
 def decide(proposed: Verdict, claims: list[Claim], evidence: list[Evidence], llm: str,
            proposed_kill_class: Optional[KillClass] = None,
-           decision_id: Optional[str] = None) -> Decision:
+           decision_id: Optional[str] = None, request_text: Optional[str] = None) -> Decision:
     if not llm:
         raise ValueError("decision must carry an 'llm' label ('mock' or '<provider>:<model>')")
     ev = {e.claim_id: e for e in evidence}
@@ -61,7 +63,8 @@ def decide(proposed: Verdict, claims: list[Claim], evidence: list[Evidence], llm
     def done(final: Verdict, kill: Optional[KillClass] = None) -> Decision:
         return Decision(decision_id or f"d_{uuid.uuid4().hex[:10]}", proposed, final, llm,
                         kill_class=kill, gate_log=log, human_required=(final == Verdict.NEEDS_HUMAN),
-                        evidence=evidence, claims=claims, calcs=[r.__dict__ for r in calcs])
+                        evidence=evidence, claims=claims, calcs=[r.__dict__ for r in calcs],
+                        request_text=request_text)
 
     # C0: arithmetic is done by code. Bad or disputed sums go to a human; a
     # failed check kills the plan whatever the proposer said, and the source
@@ -132,9 +135,9 @@ def decide(proposed: Verdict, claims: list[Claim], evidence: list[Evidence], llm
         return done(Verdict.NEEDS_HUMAN)
     log.append(f"G2 pass: {len(facts)} critical fact(s) VERIFIED")
 
-    # G6: a GO that rests on an amount needs a passing CALC.
-    if _amount_based(claims) and not any(r.check_passed for r in calcs):
-        log.append("G6 fail: GO depends on an amount/percentage but no passing CALC")
+    # G6: a GO that rests on the user's amounts/thresholds needs a passing CALC.
+    if _amount_based(claims, request_text) and not any(r.check_passed for r in calcs):
+        log.append("G6 fail: GO depends on the user's amount/threshold but no passing CALC")
         return done(Verdict.NEEDS_HUMAN)
     return done(Verdict.GO)
 
@@ -158,5 +161,5 @@ def require_verified_go(decision: Decision) -> None:
     calcs = _calcs(decision.claims, ev)
     if any(r.status != "OK" or r.check_passed is False for r in calcs):
         raise GoNotAllowed("a CALC claim is invalid, disputed or fails its check")
-    if _amount_based(decision.claims) and not any(r.check_passed for r in calcs):
+    if _amount_based(decision.claims, decision.request_text) and not any(r.check_passed for r in calcs):
         raise GoNotAllowed("GO depends on an amount but has no passing CALC")

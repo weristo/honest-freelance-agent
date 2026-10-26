@@ -52,6 +52,7 @@ class SourceDoc:
     error: Optional[str] = None          # network error / refusal text
     refused: bool = False                # SSRF policy refusal
     robots_disallowed: bool = False
+    last_modified: Optional[str] = None  # HTTP Last-Modified header, if any
     meta: dict = field(default_factory=dict)
 
 
@@ -170,11 +171,14 @@ class LiveFetcher:
                 continue
             raw = resp.read(MAX_BYTES + 1)
             ctype = resp.headers.get("Content-Type", "")
+            last_mod = resp.headers.get("Last-Modified")
             resp.close()
             if len(raw) > MAX_BYTES:
                 return SourceDoc(url, current, status, ctype, fetched_at=fetched_at,
                                  error="body exceeds 10 MB cap")
-            return doc_from_bytes(url, current, status, ctype, raw, fetched_at)
+            doc = doc_from_bytes(url, current, status, ctype, raw, fetched_at)
+            doc.last_modified = last_mod
+            return doc
         return SourceDoc(url, current, None, fetched_at=fetched_at, error="too many redirects")
 
 
@@ -232,6 +236,7 @@ def load_snapshot(path: str) -> SourceDoc:
         fetched_at=meta.get("fetched_at"),
         visible=visible, embedded=embedded,
         is_html="html" in ctype.lower(),
+        last_modified=meta.get("last_modified"),
         meta=meta,
     )
 
