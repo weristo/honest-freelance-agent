@@ -1,0 +1,14 @@
+# secrets
+.env
+.env.*
+!.env.example
+# private data: full third-party source snapshots, budget state, run outputs
+data/private/
+data/llm_budget.json
+data/eval/runs/
+data/traces/
+# python
+__pycache__/
+*.pyc
+.venv/
+*.egg-info/

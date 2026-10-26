@@ -1,0 +1,82 @@
+"""Proposer prompt template. The prompt hash is logged with every run so an
+eval can prove the prompt was frozen before the holdout set was touched."""
+from __future__ import annotations
+
+import hashlib
+import json
+
+PROMPT_VERSION = "p1"
+
+SYSTEM_PROMPT = """You are the proposer in an honest freelance agent.
+You read a freelance opportunity (or a quote / invoice step) and the platform
+or legal rules the user pasted or linked. You PROPOSE a decision; you do not
+make it. Code will fetch every source you cite and check every quote
+character by character. A quote that is not verbatim in the source makes
+your proposal worthless, so never paraphrase inside "quote".
+
+Rules:
+- decision: "GO", "KILL" or "NEEDS_HUMAN".
+- kill_class (only for KILL): "NOT_WORTH", "RULE_VIOLATION" or "POLICY_REFUSAL".
+  Use POLICY_REFUSAL when doing the task would break a platform's terms or the law.
+- Every fact the decision depends on is a claim with kind "FACT", a verbatim
+  "quote" of at least 20 characters, the exact "source_url" and a "rule_id".
+- polarity "SUPPORTS" if the fact supports going ahead, "CONTRADICTS" if it
+  argues against the user's plan.
+- Reasoning that combines facts (arithmetic, "these two rules conflict") is
+  a claim with kind "INFERENCE" and "derived_from" listing claim ids.
+- Statements only the user can know (their income, their client history)
+  are kind "USER_ATTESTED".
+- If you cannot find a quotable source, say so: decision "NEEDS_HUMAN".
+Return ONLY a JSON object matching the schema. No prose outside JSON."""
+
+OUTPUT_SCHEMA = {
+    "type": "object",
+    "additionalProperties": False,
+    "required": ["decision", "rationale", "claims"],
+    "properties": {
+        "decision": {"enum": ["GO", "KILL", "NEEDS_HUMAN"]},
+        "kill_class": {"enum": ["NOT_WORTH", "RULE_VIOLATION", "POLICY_REFUSAL", None]},
+        "rationale": {"type": "string"},
+        "claims": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "additionalProperties": False,
+                "required": ["claim_id", "text", "kind", "critical", "polarity"],
+                "properties": {
+                    "claim_id": {"type": "string"},
+                    "text": {"type": "string"},
+                    "kind": {"enum": ["FACT", "INFERENCE", "USER_ATTESTED"]},
+                    "critical": {"type": "boolean"},
+                    "quote": {"type": "string"},
+                    "source_url": {"type": "string"},
+                    "rule_id": {"type": "string"},
+                    "rule_topic": {"type": "string"},
+                    "polarity": {"enum": ["SUPPORTS", "CONTRADICTS"]},
+                    "derived_from": {"type": "array", "items": {"type": "string"}},
+                },
+            },
+        },
+    },
+}
+
+USER_TEMPLATE = """Opportunity / request:
+<<<
+{request}
+>>>
+
+Sources the user provided (URL list; their text may follow):
+{sources}
+
+Respond with the JSON object only."""
+
+
+def render_user(request: str, sources: list[str]) -> str:
+    src = "\n".join(f"- {u}" for u in sources) or "- (none)"
+    return USER_TEMPLATE.format(request=request, sources=src)
+
+
+def prompt_sha256() -> str:
+    blob = json.dumps([PROMPT_VERSION, SYSTEM_PROMPT, USER_TEMPLATE, OUTPUT_SCHEMA],
+                      sort_keys=True, ensure_ascii=False)
+    return hashlib.sha256(blob.encode("utf-8")).hexdigest()
