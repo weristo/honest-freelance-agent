@@ -14,8 +14,8 @@ Honesty rules enforced in code:
  - mock results are written only to the mock table and printed with a
    "MOCK - pipeline test, not a model measurement" banner; the real-results
    writer refuses any mock row;
- - holdout cases (split "holdout", ids R*) run only with --holdout and a
-   --frozen-prompt-sha equal to the current proposer prompt hash.
+ - the holdout (separate file, pinned SHA-256) runs only after a freeze,
+   only with a real model, and only once (see hfa/holdout.py).
 """
 from __future__ import annotations
 
@@ -31,16 +31,13 @@ from .models import EvidenceState, KillClass, Verdict
 from .pipeline import decide_from_proposal
 from .proposer.base import Proposer
 from .proposer.prompt import prompt_sha256
+from . import holdout as holdout_mod
 from .proposer.providers import MockClient
 
 MOCK_BANNER = "MOCK - pipeline test, not a model measurement"
 
 
 class MixedLLMError(ValueError):
-    pass
-
-
-class HoldoutLocked(PermissionError):
     pass
 
 
@@ -52,13 +49,10 @@ def load_cases(path: str) -> list[dict]:
     return cases
 
 
-def select_cases(cases: list[dict], holdout: bool, frozen_prompt_sha: Optional[str]) -> list[dict]:
-    if not holdout:
-        return [c for c in cases if c["split"] == "dev"]
-    if not frozen_prompt_sha or frozen_prompt_sha != prompt_sha256():
-        raise HoldoutLocked("holdout needs --frozen-prompt-sha equal to the current prompt hash "
-                            "(freeze the prompt and gate first)")
-    return [c for c in cases if c["split"] == "holdout"]
+def dev_cases(cases: list[dict]) -> list[dict]:
+    """Only dev cases are ever run from the main file; the holdout has its own
+    loader with a hash lock (hfa.holdout)."""
+    return [c for c in cases if c["split"] == "dev"]
 
 
 # --- naive mock proposer -----------------------------------------------------
@@ -98,6 +92,10 @@ def naive_proposal(case: dict) -> dict:
         claims.append({"claim_id": f"{case['id']}_h0", "text": "recalled rule", "kind": "FACT",
                        "critical": True, "quote": HYPOTHETICAL_QUOTE, "source_url": src["url"],
                        "rule_id": "EVAL", "polarity": "SUPPORTS"})
+    for j, inf in enumerate(case.get("inferences") or []):
+        claims.append({"claim_id": f"{case['id']}_i{j}", "text": inf["text"], "kind": "INFERENCE",
+                       "critical": True, "polarity": "SUPPORTS",
+                       "derived_from": [f"{case['id']}_c{k}" for k in inf.get("derived_from", [])]})
     if case.get("user_attested"):
         claims.append({"claim_id": f"{case['id']}_u0", "text": case["user_attested"],
                        "kind": "USER_ATTESTED", "critical": True, "polarity": "SUPPORTS",
@@ -164,6 +162,7 @@ def aggregate(rows: list[dict]) -> dict:
             "deferral_rate": round(sum(r[cond] in ("NEEDS_HUMAN", "UNVERIFIED") for r in decided)
                                    / len(decided), 3) if decided else None,
             "exact_label_agreement": sum(r[cond] == r["gold"] for r in ok),
+            "kill_refuse_mixups": sum({r[cond], r["gold"]} == {"KILL", "REFUSE"} for r in ok),
             "labels": dict(Counter(r[cond] for r in ok)),
         }
     out["n_non_go"], out["n_go"] = len(non_go), len(go)
@@ -197,6 +196,7 @@ def format_table(rows: Iterable[dict], summary: dict) -> str:
         lines.append(f"{cond:12} false_GO={s['false_go']}/{summary['n_non_go']} "
                      f"rate={s['false_go_rate']} false_KILL={s['false_kill_count']}/{summary['n_go']} "
                      f"deferral={s['deferral_rate']} exact={s['exact_label_agreement']}/{summary['n_ok']}")
+        lines.append(f"{'':12} KILL<->REFUSE mix-ups={s['kill_refuse_mixups']} (not false GO; reported separately)")
     return "\n".join(lines)
 
 
@@ -206,12 +206,21 @@ def main(argv: Optional[list[str]] = None) -> int:
     ap.add_argument("--snapshots", default="data/private/snapshots",
                     help="directory of full-text source snapshots (not in the repo)")
     ap.add_argument("--live", action="store_true", help="fetch sources live instead of snapshots")
-    ap.add_argument("--holdout", action="store_true")
+    ap.add_argument("--holdout", metavar="FILE", help="holdout file (pinned hash; frozen, real model, once)")
     ap.add_argument("--frozen-prompt-sha")
+    ap.add_argument("--freeze", action="store_true", help="record prompt + decision-code hashes (final)")
     ap.add_argument("--out", default="data/eval/runs")
     a = ap.parse_args(argv)
 
-    cases = select_cases(load_cases(a.cases), a.holdout, a.frozen_prompt_sha)
+    if a.freeze:
+        print(json.dumps(holdout_mod.freeze(), indent=1))
+        return 0
+    if a.holdout:
+        cases = holdout_mod.load_holdout(a.holdout)
+        # This round has only the mock proposer, so authorize_run refuses here.
+        holdout_mod.authorize_run("mock", a.frozen_prompt_sha)
+    else:
+        cases = dev_cases(load_cases(a.cases))
     if not a.live and not os.path.isdir(a.snapshots):
         print(f"snapshot dir {a.snapshots!r} not found; use --live to fetch sources fresh", file=sys.stderr)
         return 2

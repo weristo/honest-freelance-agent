@@ -196,14 +196,9 @@ class EvalHonestyTests(TmpDirCase):
         self.assertIn(evalrun.MOCK_BANNER, evalrun.format_table(rows, s))
         self.assertTrue(all(r["llm"] == "mock" for r in rows))
 
-    def test_holdout_locked_until_prompt_frozen(self):
+    def test_main_file_runs_dev_cases_only(self):
         cases = [{"id": "T1", "split": "dev"}, {"id": "R1", "split": "holdout"}]
-        self.assertEqual([c["id"] for c in evalrun.select_cases(cases, False, None)], ["T1"])
-        with self.assertRaises(evalrun.HoldoutLocked):
-            evalrun.select_cases(cases, True, None)
-        with self.assertRaises(evalrun.HoldoutLocked):
-            evalrun.select_cases(cases, True, "0" * 64)
-        self.assertEqual([c["id"] for c in evalrun.select_cases(cases, True, prompt_sha256())], ["R1"])
+        self.assertEqual([c["id"] for c in evalrun.dev_cases(cases)], ["T1"])
 
     def test_public_case_file_has_no_long_quotes(self):
         here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))

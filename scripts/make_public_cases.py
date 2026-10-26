@@ -15,7 +15,22 @@ MAX_QUOTE = 200
 CLAIM_KEYS = ("role", "snapshot", "url", "http", "fetched_at", "norm_sha256",
               "match_hits", "match_layers", "snippet_sha256")
 CASE_KEYS = ("id", "domain", "input", "gold", "gold_detail", "trap",
-             "naive_false_go_trap", "user_attested")
+             "naive_false_go_trap", "user_attested", "inferences")
+
+# Gold / coding changes made in this repo, each one logged in EVAL_CHANGELOG.md.
+# Applied on top of the private source file so the change stays auditable.
+OVERRIDES = {
+    "T05": {  # EVAL_CHANGELOG #E7
+        "gold": "KILL",
+        "gold_detail": "RULE_VIOLATION: devpost/rules requires a public repo; the source is hackathon "
+                       "rules, not a terms-of-service document (changed 2026-10-26, see EVAL_CHANGELOG.md)",
+    },
+    "T06": {  # EVAL_CHANGELOG #E8
+        "claim_roles": {0: "CONTEXT"},
+        "inferences": [{"text": "The OAH promotional licence conflicts with the PayPal 'solely owned' rule "
+                                "if the same core is submitted to both events.", "derived_from": [0, 1]}],
+    },
+}
 
 
 def public_claim(c: dict) -> dict:
@@ -31,6 +46,7 @@ def public_source(s: dict) -> dict:
 
 
 def main(src: str, dst: str) -> None:
+    """Dev cases (T*). For the holdout file use scripts/make_public_holdout.py."""
     n = 0
     with open(src, encoding="utf-8") as f, open(dst, "w", encoding="utf-8") as g:
         for line in f:
@@ -40,6 +56,12 @@ def main(src: str, dst: str) -> None:
             out = {k: case[k] for k in CASE_KEYS if k in case}
             out["split"] = "holdout" if case["id"].startswith("R") else "dev"
             out["claims"] = [public_claim(c) for c in case.get("claims") or []]
+            ov = OVERRIDES.get(case["id"], {})
+            for k in ("gold", "gold_detail", "inferences"):
+                if k in ov:
+                    out[k] = ov[k]
+            for i, role in ov.get("claim_roles", {}).items():
+                out["claims"][i]["role"] = role
             for k in ("source", "source2"):
                 if case.get(k):
                     out[k] = public_source(case[k])

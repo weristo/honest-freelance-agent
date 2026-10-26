@@ -19,10 +19,18 @@ class GateTests(unittest.TestCase):
         self.assertEqual(d.final, V.GO)
         require_verified_go(d)  # does not raise
 
-    def test_g1_verified_contradiction_kills_even_if_proposer_says_go(self):
-        c = [fact(cid="a", polarity=Polarity.CONTRADICTS)]
-        d = decide(V.GO, c, [ev("a", S.VERIFIED)], "mock", KillClass.POLICY_REFUSAL)
+    def test_g1_kill_class_comes_from_registry_not_from_llm(self):
+        rules = [fact(cid="a", polarity=Polarity.CONTRADICTS, source_url="https://example.org/rules")]
+        d = decide(V.GO, rules, [ev("a", S.VERIFIED)], "mock", KillClass.POLICY_REFUSAL)
+        self.assertEqual((d.final, d.kill_class), (V.KILL, KillClass.RULE_VIOLATION))
+        tos = [fact(cid="a", polarity=Polarity.CONTRADICTS, source_url="https://example.org/legal/terms")]
+        d = decide(V.GO, tos, [ev("a", S.VERIFIED)], "mock")
         self.assertEqual((d.final, d.kill_class), (V.KILL, KillClass.POLICY_REFUSAL))
+
+    def test_llm_refusal_without_registry_g1_is_downgraded(self):
+        c = [fact(cid="a")]
+        d = decide(V.KILL, c, [ev("a", S.VERIFIED)], "mock", KillClass.POLICY_REFUSAL)
+        self.assertEqual((d.final, d.kill_class), (V.KILL, KillClass.RULE_VIOLATION))
 
     def test_g2_go_with_zero_facts_is_refused(self):
         d = decide(V.GO, [], [], "mock")

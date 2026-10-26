@@ -9,10 +9,11 @@ invoice.
 
 > Built by AI agents (Claude) under the supervision of Otto Lőkös.
 
-Status: early build (hackathon). The verifier, gate, budget guard, PayPal
-sandbox client and mini-eval run and are tested. The proposer runs on a
-**mock** in this version; the real-LLM path is implemented but has not been
-measured yet. The UI is not built yet.
+Status: early build (hackathon), local runs only (no hosted demo). The
+verifier, gate, budget guard, PayPal sandbox client and mini-eval run and
+are tested. The real-LLM path is implemented and wired, but no model has
+been measured yet: every number in this README comes from the **mock**
+proposer. The UI is not built yet; the demo prints decision cards as JSON.
 
 ## Why
 
@@ -58,10 +59,20 @@ user knows (USER_ATTESTED) are never VERIFIED and need an explicit tick.
 
 Reason codes: `EXACT_MATCH`, `NO_MATCH`, `QUOTE_TOO_SHORT`, `URL_REFUSED`,
 `FETCH_FAILED`, `FETCH_BLOCKED` (403/429, captcha, login wall, robots.txt -
-never bypassed), `SOFT_404`, `THIN_CONTENT` (JS-only page), `MULTI_MATCH`,
-`REDIRECTED` (other domain), `STALE_SOURCE` (legal page older than 365 days),
-`AMBIGUOUS_CONTEXT` (guard words such as "except", "not", "employer" next to
-a supporting quote), `CONTRADICTED`, `SOURCE_CHANGED`.
+never bypassed), `SOFT_404`, `THIN_CONTENT` (JS-only page), `MULTI_MATCH`
+(several places, and one of them has a guard word or the places show
+different amounts), `MULTI_CONSISTENT` (several places that agree: VERIFIED,
+all snippets kept), `REDIRECTED` (other domain), `STALE_SOURCE` (legal page
+older than 365 days), `AMBIGUOUS_CONTEXT` (a guard word such as "except",
+"not", "employer" in the sentence of a supporting quote or the sentence right
+after it; words inside the quote do not count), `CONTRADICTED`,
+`SOURCE_CHANGED`.
+
+REFUSE vs KILL is decided by a small source registry in code
+(`hfa/registry.py`), never by the LLM: a verified contradicting fact from a
+policy document (terms / acceptable-use / legal / site-policy pages, tax
+authority and legislation sites) gives REFUSE (`POLICY_REFUSAL`); any other
+source gives KILL (`RULE_VIOLATION`). An unknown source is never a REFUSE.
 
 ### Normalization (applied identically to quote and source)
 HTML entity decoding; Unicode **NFKC**; curly quotes -> straight, dashes ->
@@ -73,47 +84,64 @@ inline elements do not (otherwise `Evectv.<sup>[3]</sup>` would break).
 
 ## Setup
 
-Python 3.11+ and nothing else: the core uses only the standard library.
+Python 3.11+ and nothing else for the core (standard library only).
 
 ```bash
 git clone <this repo> && cd honest-freelance-agent
-python3 -m unittest discover -s tests -t .      # 67 tests, offline
-cp .env.example .env                              # then fill in YOUR sandbox keys
+python3 -m unittest discover -s tests -t .      # 87 tests, offline, no keys
 ```
 
 ## Run
 
+**Mock mode - no keys, no network, `"llm": "mock"`.** A scripted proposer
+against a fictional terms page bundled in `hfa/demo_data/`, and an in-memory
+PayPal stand-in. It shows the pipeline (GO with invoice, REFUSE, UNVERIFIED
+paraphrase). It is not a measurement of anything.
+
 ```bash
+python3 -m hfa demo --mock
+```
+
+**Real mode - your own keys, one command.** Fill in `.env` (copy
+`.env.example`): a PayPal **sandbox** REST app (developer.paypal.com -> Apps
+& Credentials -> Sandbox) plus two sandbox personas, and your Anthropic key.
+
+```bash
+cp .env.example .env          # set PAYPAL_CLIENT_ID, PAYPAL_CLIENT_SECRET,
+                              # HFA_SANDBOX_MERCHANT_EMAIL, HFA_SANDBOX_BUYER_EMAIL,
+                              # HFA_LLM_PROVIDER=anthropic, HFA_API_KEY
+pip install anthropic         # only needed for the Anthropic provider
+python3 -m hfa demo --invoice
+```
+
+This asks the model (default `claude-haiku-4-5`, budget-capped) whether the
+example request is allowed under the hackathon rules, fetches the rules page
+live, verifies every quote, runs the gate, and only on GO creates a sandbox
+invoice (draft -> send -> status). Without `--invoice` it stops after the
+decision. The trace goes to `data/traces/demo.jsonl` (redacted).
+
+Other commands:
+
+```bash
+python3 -m hfa paypal-smoke   # sandbox OAuth token only: prints HTTP status + token length
+python3 -m hfa budget         # LLM spend vs. caps
+
 # Verify one quote against a live page (fresh fetch). On 2026-10-26 this
-# returned NEEDS_HUMAN / MULTI_MATCH: the URL appears in 4 different code
-# samples on that page, so a human has to look.
+# returned VERIFIED / MULTI_CONSISTENT: the URL appears in 4 code samples on
+# that page, none with a guard word or a differing amount.
 python3 -m hfa verify --url https://developer.paypal.com/api/rest/ \
   --quote "https://api-m.sandbox.paypal.com/v1/oauth2/token"
 
-# PayPal sandbox smoke test (prints only HTTP status and token length)
-set -a; . ./.env; set +a
-python3 -m hfa paypal-smoke
-
-# LLM spend vs. caps
-python3 -m hfa budget
-
-# Mini-eval (mock proposer), fetching every source live
-# (live mode is implemented but not yet part of the test suite)
-python3 -m hfa eval --live
-# ...or offline, if you have the snapshot files in data/private/snapshots
-python3 -m hfa eval
+python3 -m hfa eval --live    # mini-eval (mock proposer), sources fetched live
+                              # (implemented, not yet part of the test suite)
 ```
 
-PayPal: create a **sandbox** REST app at developer.paypal.com (Apps &
-Credentials -> Sandbox) and use its client id / secret. The client refuses
-any host other than `api-m.sandbox.paypal.com` (exact match, https, default
-port), at startup, in the constructor and before every request. There is no
-switch to turn this off.
+The PayPal client refuses any host other than `api-m.sandbox.paypal.com`
+(exact match, https, default port), at startup, in the constructor and
+before every request. There is no switch to turn this off.
 
-LLM: `HFA_LLM_PROVIDER` = `mock` (default) | `anthropic` | `openai_compat`;
-`HFA_MODEL` defaults to `claude-haiku-4-5`; the key is the judge's own
-(`HFA_API_KEY`). `pip install anthropic` is needed only for the Anthropic
-provider.
+LLM settings: `HFA_LLM_PROVIDER` = `mock` (default) | `anthropic` |
+`openai_compat`; `HFA_MODEL` (default `claude-haiku-4-5`); `HFA_API_KEY`.
 
 ## Cost guard
 
@@ -141,14 +169,21 @@ of honesty, so that "always ask a human" cannot look like a win.
 Honesty rules in code: every row carries `llm` (`mock` or
 `<provider>:<model>`); aggregation refuses a run that mixes mock and real
 rows; mock results go only to a separate table with the banner *"MOCK -
-pipeline test, not a model measurement"*. Holdout cases (`split: holdout`)
-run only with `--holdout --frozen-prompt-sha <current prompt hash>`; no
-holdout cases ship yet.
+pipeline test, not a model measurement"*. KILL<->REFUSE mix-ups are
+reported on their own line.
+
+Holdout: `data/eval/holdout_public.jsonl` (11 cases), pinned by SHA-256. It
+runs only after `python3 -m hfa eval --freeze` has recorded the prompt hash
+and the decision-code hash, only if both still match, never with the mock,
+and only once. Every gold or coding change before the freeze is logged in
+[EVAL_CHANGELOG.md](EVAL_CHANGELOG.md), including whether it was made after
+seeing mock results.
 
 Current numbers are **mock only** (a stand-in that says GO on every trap
-case): without verifier 32/35 false GO, with verifier + gate 0/35, deferral
-5/23. This shows that the pipeline wiring works; it says nothing about any
-real model.
+case), dev set: without verifier 32/35 false GO; with verifier + gate 1/35
+(T16: the fee quote is correct, the loss is arithmetic the gate cannot see),
+false KILL 0/5, deferral 3/24, KILL<->REFUSE mix-ups 2. This shows that the
+pipeline wiring works; it says nothing about any real model.
 
 ## Limitations (honest list)
 
@@ -162,8 +197,11 @@ real model.
 - The domain check uses the last two host labels (no public suffix list).
 - DNS is resolved for the SSRF check and again for the connection
   (rebinding window).
-- The gate cannot tell a terms-of-service refusal from a rule violation by
-  itself; that comes from the proposer's `kill_class`.
+- REFUSE vs KILL comes from a URL-pattern registry; a fee or threshold page
+  that happens to live under `/terms` or on a tax-authority domain is
+  treated as a policy document.
+- "NOT_WORTH" decisions rest on arithmetic; unless the proposer states that
+  arithmetic as an INFERENCE claim, the gate cannot catch a wrong sum.
 
 ## License
 

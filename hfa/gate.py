@@ -11,6 +11,7 @@ from __future__ import annotations
 import uuid
 from typing import Optional
 
+from .registry import is_policy_source, policy_reason
 from .models import (Claim, ClaimKind, Decision, Evidence, EvidenceState,
                      KillClass, Polarity, Verdict)
 
@@ -21,6 +22,11 @@ class GoNotAllowed(Exception):
 
 def _critical_facts(claims, ev):
     return [(c, ev.get(c.claim_id)) for c in claims if c.critical and c.kind == ClaimKind.FACT]
+
+
+def _no_llm_refusal(kc: Optional[KillClass]) -> Optional[KillClass]:
+    """POLICY_REFUSAL is only granted by G1 with a registry source."""
+    return KillClass.RULE_VIOLATION if kc == KillClass.POLICY_REFUSAL else kc
 
 
 def decide(proposed: Verdict, claims: list[Claim], evidence: list[Evidence], llm: str,
@@ -42,9 +48,11 @@ def decide(proposed: Verdict, claims: list[Claim], evidence: list[Evidence], llm
               and e is not None and e.state == EvidenceState.VERIFIED]
     if contra:
         log.append(f"G1 fail: verified contradicting fact(s) {[c.claim_id for c in contra]}")
-        kc = proposed_kill_class if proposed_kill_class in (KillClass.RULE_VIOLATION,
-                                                           KillClass.POLICY_REFUSAL) else KillClass.RULE_VIOLATION
-        return done(Verdict.KILL, kc)
+        # REFUSE vs KILL comes from the source registry, never from the LLM.
+        policy = [c for c in contra if is_policy_source(c.source_url)]
+        for c in contra:
+            log.append(f"G1 source {c.claim_id}: {policy_reason(c.source_url)}")
+        return done(Verdict.KILL, KillClass.POLICY_REFUSAL if policy else KillClass.RULE_VIOLATION)
     log.append("G1 pass")
 
     # G3: anything needing a human, or a decision that rests on an inference.
@@ -60,7 +68,7 @@ def decide(proposed: Verdict, claims: list[Claim], evidence: list[Evidence], llm
     if unver:
         log.append(f"G4 fail: unverified={unver}")
         if proposed == Verdict.KILL:
-            return done(Verdict.KILL, proposed_kill_class or KillClass.NOT_WORTH)
+            return done(Verdict.KILL, _no_llm_refusal(proposed_kill_class) or KillClass.NOT_WORTH)
         return done(Verdict.NEEDS_HUMAN)
     log.append("G4 pass")
 
@@ -70,12 +78,12 @@ def decide(proposed: Verdict, claims: list[Claim], evidence: list[Evidence], llm
     if unticked:
         log.append(f"G5 fail: user-attested without tick={unticked}")
         return done(Verdict.NEEDS_HUMAN if proposed != Verdict.KILL else Verdict.KILL,
-                    proposed_kill_class if proposed == Verdict.KILL else None)
+                    _no_llm_refusal(proposed_kill_class) if proposed == Verdict.KILL else None)
     log.append("G5 pass")
 
     if proposed == Verdict.KILL:
         log.append("proposer KILL kept (killing needs no verification)")
-        return done(Verdict.KILL, proposed_kill_class or KillClass.NOT_WORTH)
+        return done(Verdict.KILL, _no_llm_refusal(proposed_kill_class) or KillClass.NOT_WORTH)
     if proposed == Verdict.NEEDS_HUMAN:
         log.append("proposer asked for a human")
         return done(Verdict.NEEDS_HUMAN)

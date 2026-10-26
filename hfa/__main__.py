@@ -5,6 +5,8 @@
   python -m hfa eval [--snapshots DIR | --live]          # mini-eval (mock proposer)
   python -m hfa budget                                   # LLM spend vs. caps
   python -m hfa paypal-smoke                             # sandbox OAuth token only
+  python -m hfa demo --mock                              # no keys, llm: mock
+  python -m hfa demo [--invoice]                         # judge's own keys from .env
 """
 from __future__ import annotations
 
@@ -42,7 +44,9 @@ def _budget(_a) -> int:
 
 
 def _paypal_smoke(_a) -> int:
+    from .demo import load_dotenv
     from .paypal import SandboxClient, smoke_token
+    load_dotenv()
     from .paypal.client import PayPalError
     try:
         out = smoke_token(SandboxClient.from_env())
@@ -68,7 +72,15 @@ def main(argv=None) -> int:
     sub.add_parser("eval", help="mini-eval; see python -m hfa eval --help")
     sub.add_parser("budget")
     sub.add_parser("paypal-smoke")
+    dm = sub.add_parser("demo")
+    dm.add_argument("--mock", action="store_true", help="no keys, scripted proposer (llm: mock)")
+    dm.add_argument("--invoice", action="store_true", help="create a SANDBOX invoice if the gate says GO")
     a = ap.parse_args(argv)
+    if a.cmd == "demo":
+        from . import demo
+        out = demo.run_mock() if a.mock else demo.run_real(a.invoice)
+        print(json.dumps(out, indent=1, ensure_ascii=False))
+        return 0
     if a.cmd == "verify":
         if not (a.url or a.snapshot):
             ap.error("verify needs --url or --snapshot")

@@ -33,6 +33,7 @@ class EvidenceState(str, enum.Enum):
 
 class Reason(str, enum.Enum):
     EXACT_MATCH = "EXACT_MATCH"
+    MULTI_CONSISTENT = "MULTI_CONSISTENT"
     NO_MATCH = "NO_MATCH"
     QUOTE_TOO_SHORT = "QUOTE_TOO_SHORT"
     FETCH_FAILED = "FETCH_FAILED"

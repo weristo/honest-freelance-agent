@@ -14,10 +14,16 @@ NEEDS_HUMAN and a reason code. Order of checks (first hit wins):
   no exact match                    -> UNVERIFIED  NO_MATCH (or SOURCE_CHANGED
                                        if the passage was seen before);
                                        nearest_span shown for display only
-  match in >1 distinct context      -> NEEDS_HUMAN MULTI_MATCH
+  match in >1 distinct context      -> NEEDS_HUMAN MULTI_MATCH if any context
+                                       has a guard word or the contexts show
+                                       different amounts; else VERIFIED
+                                       MULTI_CONSISTENT (all snippets kept)
   redirected to another domain      -> NEEDS_HUMAN REDIRECTED
   legal source older than 365 days  -> NEEDS_HUMAN STALE_SOURCE
   guard word near a SUPPORTS quote  -> NEEDS_HUMAN AMBIGUOUS_CONTEXT
+                                       ("near" = the quote's sentence + the
+                                       next sentence; words inside the quote
+                                       do not count)
   otherwise                         -> VERIFIED    EXACT_MATCH
 
 A string match proves the text is in the source, not that the conclusion
@@ -42,7 +48,6 @@ MIN_QUOTE_CHARS = 20
 THIN_CONTENT_CHARS = 2000
 SNIPPET_RADIUS = 300
 DEDUP_RADIUS = 40          # see the merge rule in verify()
-GUARD_RADIUS = 150         # guard words are searched this close to the quote
 STALE_DAYS = 365
 SOFT_404_MAX_CHARS = 40000
 
@@ -216,10 +221,19 @@ def verify(claim: Claim, fetcher: Fetcher, now: Optional[datetime] = None) -> Ev
     ok = dict(match_layer=layer, match_offset=s, context_snippet=snippet,
               snippet_sha256=sha256_hex(layers[layer][s:e]), **base)
 
+    multi_detail = ""
     if len(contexts) > 1:
-        return ev(EvidenceState.NEEDS_HUMAN, Reason.MULTI_MATCH,
-                  other_snippets=[snip(h) for h in contexts[1:]],
-                  detail=f"quote appears in {len(contexts)} different contexts", **ok)
+        # Several distinct places. Accept only if no place carries a guard
+        # word and the places do not disagree on amounts (prices, %, fees).
+        guards = [g for h in contexts for g in _guard_hits(layers[h[0]], h[1], h[2])]
+        amounts = {frozenset(_amounts(layers[h[0]], h[1], h[2])) for h in contexts}
+        if guards or len(amounts) > 1:
+            why = (f"guard words {sorted(set(guards))}" if guards else "different amounts nearby")
+            return ev(EvidenceState.NEEDS_HUMAN, Reason.MULTI_MATCH, guard_hits=sorted(set(guards)),
+                      other_snippets=[snip(h) for h in contexts[1:]],
+                      detail=f"quote appears in {len(contexts)} different contexts; {why}", **ok)
+        ok["other_snippets"] = [snip(h) for h in contexts[1:]]
+        multi_detail = f"{len(contexts)} consistent matches"
 
     if doc.final_url and _registrable(_host(doc.final_url)) != _registrable(_host(claim.source_url)):
         return ev(EvidenceState.NEEDS_HUMAN, Reason.REDIRECTED,
@@ -235,15 +249,45 @@ def verify(claim: Claim, fetcher: Fetcher, now: Optional[datetime] = None) -> Ev
                           detail=f"source dated {src_date} ({age} days old) - may be outdated", **ok)
             ok["source_date"] = src_date
 
-    t = layers[layer]
-    near = (t[max(0, s - GUARD_RADIUS):s] + " ‖ " + t[e:e + GUARD_RADIUS]).casefold()
-    guard_hits = [w for w, rx in zip(GUARD_WORDS, _GUARD_RES) if rx.search(near)]
+    guard_hits = _guard_hits(layers[layer], s, e)
     if guard_hits and claim.polarity == Polarity.SUPPORTS:
         return ev(EvidenceState.NEEDS_HUMAN, Reason.AMBIGUOUS_CONTEXT, guard_hits=guard_hits,
                   detail="words near the quote may narrow or reverse it (heuristic)", **ok)
 
-    detail = "found in page data (collapsed section)" if layer == "embedded" else ""
-    return ev(EvidenceState.VERIFIED, Reason.EXACT_MATCH, guard_hits=guard_hits, detail=detail, **ok)
+    detail = "; ".join(x for x in (multi_detail,
+                                   "found in page data (collapsed section)" if layer == "embedded" else "") if x)
+    reason = Reason.MULTI_CONSISTENT if multi_detail else Reason.EXACT_MATCH
+    return ev(EvidenceState.VERIFIED, reason, guard_hits=guard_hits, detail=detail, **ok)
+
+
+_BOUNDARY = re.compile(r"[.!?](?=\s|$)")
+_AMOUNT_RES = [re.compile(r"[$€£]\s?\d[\d.,]*\d|[$€£]\s?\d"),
+               re.compile(r"\d[\d.,]*\s?%"),
+               re.compile(r"\d[\d.,]*\s?(?:usd|eur|gbp|huf|ft)(?!\w)")]
+
+
+def guard_window(t: str, s: int, e: int) -> tuple[str, str]:
+    """Text of the sentence containing the quote (before / after the quote)
+    plus the sentence right after it. The quote's own words are excluded."""
+    start = 0
+    for m in _BOUNDARY.finditer(t, 0, s):
+        start = m.end()
+    m1 = _BOUNDARY.search(t, max(e - 1, 0))
+    end1 = m1.end() if m1 else len(t)
+    m2 = _BOUNDARY.search(t, end1)
+    end2 = m2.end() if m2 else len(t)
+    return t[start:s], t[e:end2]
+
+
+def _guard_hits(t: str, s: int, e: int) -> list[str]:
+    before, after = guard_window(t, s, e)
+    near = (before + " \u2016 " + after).casefold()
+    return [w for w, rx in zip(GUARD_WORDS, _GUARD_RES) if rx.search(near)]
+
+
+def _amounts(t: str, s: int, e: int) -> set[str]:
+    around = (t[max(0, s - SNIPPET_RADIUS):s] + " \u2016 " + t[e:e + SNIPPET_RADIUS]).casefold()
+    return {re.sub(r"\s", "", m.group(0)) for rx in _AMOUNT_RES for m in rx.finditer(around)}
 
 
 def find_contradictions(claims: Iterable[Claim], evidence: list[Evidence]) -> list[Evidence]:
