@@ -44,6 +44,8 @@ every case flagged as a false-GO trap). They test the wiring, not a model.
 | E17 | 2026-10-26 | code (gate) | **G6 narrowed** (rule clarification after seeing the mock): it fires only if the decision rests on the user's own amount or threshold, i.e. the request text states a money amount, or a critical USER_ATTESTED claim carries a number. A percentage that appears only in a source quote (e.g. "100%") no longer triggers it. The gate now receives the request text. No CALC coding was added to any case. | Coordinator decision (002). | **Yes: "szabálypontosítás a mock láttán" (rule clarification after seeing the mock).** Effect: T31 is GO again (no amount in its request); T35 stays deferred (23 000 / 60 000 EUR in the request -> a real proposer must supply a CALC). |
 | E18 | 2026-10-26 | code (verifier, new module `hfa/dates.py`) | **General source-date detection** for legal / tax sources (registry tax/legislation domains, or `source_domain_type: legal`): date = latest of HTTP Last-Modified, a year segment in the URL path (also in a query value that is a path), and dates in the text (hu/de/en formats, e.g. "2025. január 1.", "Stand: 03/2024", "Effective date: March 5, 2024", "12-Aug-2025"). Older than 365 days -> STALE_SOURCE (NEEDS_HUMAN) at claim level, so G1 cannot fire on it. No date -> VERIFIED with `date_flag: UNDATED` (yellow label). Replaces the old "latest YYYY.MM.DD in the visible text" rule. Not specific to any case. | Coordinator decision (002). | Yes (round 3: T36 REFUSE vs gold NEEDS_HUMAN). Effect: T36 -> NEEDS_HUMAN via STALE_SOURCE (latest text date 2022-12-15); T36 gold unchanged (NEEDS_HUMAN). |
 | E19 | 2026-10-26 | code (eval) | The frozen decision-code hash now also covers `dates.py`. | Follows E18. | No. |
+| E20 | 2026-10-26 | code (gate helper `calc.has_number`) | For G6, a four-digit number between 1900 and 2100 in a USER_ATTESTED claim counts as a value only if a currency sign, currency code or % stands directly next to it; otherwise it is read as a year. "2026-os bevételem 6 M Ft" still triggers G6 (because of "6 M Ft"); "2026-os" alone does not. | Coordinator decision (002). | No new tuning: mock results unchanged (0/35 false GO, 5/24 deferral, 33/40 exact). |
+| E21 | 2026-10-26 | decision (no code change) | The guard-word deferrals of T01 and T04 (gold GO) stay. They are reported as part of the deferral rate; no further tuning before the freeze. | Coordinator decision (002). | Yes (they were visible in every mock run since round 2). |
 
 ## Mock results by stage (dev set, 40 cases, MOCK - not a model measurement)
 
@@ -54,6 +56,7 @@ every case flagged as a false-GO trap). They test the wiring, not a model.
 | Round 2 (E3-E8) | **1/35** (T16) | 0/5 | 3/24 | 2 | 31/40 |
 | Round 3 (E9-E15) | 0/35 | 0/5 | 6/24 | 0 | 31/40 |
 | Round 4 (E16-E19) | 0/35 | 0/5 | 5/24 | 0 | 33/40 |
+| Final pre-freeze (E20-E21) | 0/35 | 0/5 | 5/24 | 0 | 33/40 |
 
 Without the verifier the same mock gives 32/35 false GO in every stage.
 The round-2 rise from 0 to 1 false GO is kept on purpose and reported: the
@@ -65,4 +68,4 @@ NEEDS_HUMAN (STALE_SOURCE). Other deferrals: T25 (REDIRECTED), T30
 (INFERENCE).
 
 Fingerprint at the time of writing (not a freeze): prompt
-`b893d3422d6a...`, decision code `ae438bfcb003...`.
+`b893d3422d6a...`, decision code `9bc97c853fe5...`.

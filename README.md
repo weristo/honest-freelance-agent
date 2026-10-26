@@ -108,7 +108,7 @@ Python 3.11+ and nothing else for the core (standard library only).
 
 ```bash
 git clone <this repo> && cd honest-freelance-agent
-python3 -m unittest discover -s tests -t .      # 122 tests, offline, no keys (1 skipped without the private snapshots)
+python3 -m unittest discover -s tests -t .      # 125 tests, offline, no keys (1 skipped without the private snapshots)
 ```
 
 ## Run
@@ -203,16 +203,19 @@ reported on their own line.
 Holdout: `data/eval/holdout_public.jsonl` (11 cases), pinned by SHA-256. The
 freeze has two final steps, issued by the eval owner: `python3 -m hfa eval
 --freeze gate` (hash of the decision code) and `--freeze prompt` (hash of the
-proposer prompt). The holdout runs only when both exist and still match,
+proposer prompt). Each step only writes a file (`data/eval/FREEZE_GATE.json`
+or `data/eval/FREEZE_PROMPT.json`, created once, never overwritten); it
+makes no git commit. The holdout runs only when both exist and still match,
 never with the mock, and only once. Not frozen yet. Every gold or coding change before the freeze is logged in
 [EVAL_CHANGELOG.md](EVAL_CHANGELOG.md), including whether it was made after
 seeing mock results.
 
 Current numbers are **mock only** (a stand-in that says GO on every trap
 case), dev set: without verifier 32/35 false GO; with verifier + gate + CALC
-0/35, false KILL 0/5, deferral 5/24, KILL<->REFUSE mix-ups 0. Three of the
-five gold-GO cases are deferred (guard words; T35 needs a CALC that a real
-proposer has to supply).
+0/35, false KILL 0/5, deferral rate 5/24, KILL<->REFUSE mix-ups 0. Three of
+the five gold-GO cases are deferred (T01, T04: guard words, kept on purpose
+and reported as deferrals; T35 needs a CALC that a real proposer has to
+supply).
 This shows that the pipeline wiring works; it says nothing about any real
 model. The history of every change, including the ones made after looking
 at mock numbers, is in EVAL_CHANGELOG.md.
@@ -237,7 +240,8 @@ at mock numbers, is in EVAL_CHANGELOG.md.
 - amounts written in words are not detected by G6
 - G6 fires when the request states a money amount or a USER_ATTESTED claim
   carries a number; a percentage that appears only in a source quote does
-  not trigger it.
+  not trigger it, and a bare year (1900-2100 with no currency or % next to
+  it) is not counted as a number.
 - Source dates for legal / tax sources (the latest of HTTP Last-Modified, a
   year in the URL path, and dates found in the text) are a heuristic: an old
   date quoted on a current page can look current only if a newer date is

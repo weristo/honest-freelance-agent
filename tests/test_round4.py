@@ -81,6 +81,34 @@ class StalenessTests(unittest.TestCase):
         self.assertEqual(e.reason_code, R.STALE_SOURCE, e.date_origins)
 
 
+class G6YearTests(unittest.TestCase):
+    def _decide(self, user_text):
+        from hfa.gate import decide
+        from hfa.models import Claim, ClaimKind, Evidence, Verdict as V
+        u = Claim("u1", user_text, kind=ClaimKind.USER_ATTESTED, user_confirmed=True)
+        return decide(V.GO, [fact(cid="c1"), u], [Evidence("c1", S.VERIFIED, R.EXACT_MATCH),
+                                                  Evidence("u1", S.NOT_APPLICABLE, R.NOT_A_FACT)],
+                      "mock", request_text="Can I register?")
+
+    def test_year_only_does_not_trigger_g6(self):
+        d = self._decide("2026-os bevételem alapján jogosult vagyok.")
+        self.assertEqual(d.final.value, "GO")
+        self.assertFalse(any(g.startswith("G6 fail") for g in d.gate_log))
+
+    def test_year_plus_amount_triggers_g6(self):
+        d = self._decide("2026-os bevételem 6 M Ft.")
+        self.assertEqual(d.final.value, "NEEDS_HUMAN")
+        self.assertTrue(any(g.startswith("G6 fail") for g in d.gate_log))
+
+    def test_year_like_number_with_currency_counts(self):
+        from hfa.calc import has_number
+        self.assertTrue(has_number("I earned 2026 EUR"))
+        self.assertTrue(has_number("I earned €2026"))
+        self.assertTrue(has_number("a fee of 2000%"))
+        self.assertFalse(has_number("since 1999 and in 2100"))
+        self.assertTrue(has_number("6 months"))
+
+
 class G6NarrowingTests(unittest.TestCase):
     def test_money_detection_in_request(self):
         self.assertTrue(has_money("tavaly 23 000 € forgalom"))

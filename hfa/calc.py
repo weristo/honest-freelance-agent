@@ -66,8 +66,25 @@ def has_money(text: str) -> bool:
     return any(rx.search(text or "") for rx in _MONEY)
 
 
+_NUMBER_TOKEN = re.compile(r"\d[\d.,]*")
+_UNIT_AFTER = re.compile(r"\s?(?:%|[$€£]|(?:m\s?)?(?:usd|eur|euro|gbp|huf|ft|forint|dollars?)(?!\w))", re.I)
+_UNIT_BEFORE = re.compile(r"[$€£]\s?$")
+
+
 def has_number(text: str) -> bool:
-    return bool(_DIGIT.search(text or ""))
+    """Does a user statement carry a numeric value? A four-digit number
+    between 1900 and 2100 counts only if a currency sign, currency code or %
+    stands directly next to it (otherwise it is read as a year:
+    "2026-os bevételem" -> no; "2026 EUR" -> yes)."""
+    text = text or ""
+    for m in _NUMBER_TOKEN.finditer(text):
+        tok = m.group(0).rstrip(".,")
+        if len(tok) == 4 and tok.isdigit() and 1900 <= int(tok) <= 2100:
+            if not (_UNIT_AFTER.match(text, m.start() + len(tok))
+                    or _UNIT_BEFORE.search(text[max(0, m.start() - 2):m.start()])):
+                continue
+        return True
+    return False
 
 
 def tokenize(expr: str) -> list[tuple[str, str]]:
