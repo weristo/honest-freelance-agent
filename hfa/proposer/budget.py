@@ -22,6 +22,9 @@ HARD_DAILY_USD = 1.00
 HARD_TOTAL_USD = 15.00
 DEFAULT_STATE_PATH = os.path.join("data", "llm_budget.json")
 
+PRICE_SOURCE = ("estimate from Anthropic list prices per 1M tokens "
+                "(claude-api reference table, cached 2026-09-25)")
+
 # USD per 1M tokens (input, output). Unknown models are refused, because we
 # cannot budget what we cannot price (override with HFA_PRICE_IN/HFA_PRICE_OUT).
 PRICES_PER_MTOK = {

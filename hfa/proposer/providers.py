@@ -1,10 +1,12 @@
 """LLM providers. Provider, model and key come from the environment:
 
-  HFA_LLM_PROVIDER   mock | anthropic | openai_compat     (default: mock)
+  HFA_LLM_PROVIDER   anthropic | openai_compat            (default: anthropic)
   HFA_MODEL          default claude-haiku-4-5
-  HFA_API_KEY        the judge's own key (falls back to ANTHROPIC_API_KEY /
-                     OPENAI_API_KEY for the respective provider)
+  key                ONLY from the key file (see keys.py): HFA_ENV_FILE or ./.env;
+                     shell environment keys are never used
   HFA_OPENAI_BASE_URL  for openai_compat, e.g. https://api.openai.com/v1
+
+The mock is used only when explicitly requested (CLI --mock).
 
 Keys are never logged, never put in prompts, traces or the UI.
 """
@@ -16,6 +18,7 @@ import urllib.request
 from typing import Callable, Optional
 
 from .base import LLMResponse
+from .keys import lookup_key
 
 DEFAULT_MODEL = "claude-haiku-4-5"
 
@@ -92,22 +95,42 @@ class OpenAICompatClient:
                            int(usage.get("prompt_tokens", 0)), int(usage.get("completion_tokens", 0)))
 
 
-def client_from_env(mock_responder: Optional[Callable[[str, str], str]] = None):
-    provider = os.environ.get("HFA_LLM_PROVIDER", "mock").strip().lower()
+class UnavailableClient:
+    """Explicit 'no LLM' state: the proposer reports status 'unavailable'."""
+
+    provider = "unavailable"
+    model = "none"
+
+    def __init__(self, reason: str):
+        self.reason = reason
+
+    @property
+    def label(self) -> str:
+        return "unavailable"
+
+    def complete(self, system: str, user: str, max_tokens: int):
+        raise RuntimeError(f"llm unavailable: {self.reason}")
+
+
+def client_from_env(mock: bool = False, mock_responder: Optional[Callable[[str, str], str]] = None):
+    """Real client from the key file, or UnavailableClient. The mock is used
+    only when the caller passes mock=True (the CLI's --mock switch)."""
+    if mock:
+        if mock_responder is None:
+            raise ValueError("mock needs a responder")
+        return MockClient(mock_responder)
+    provider = os.environ.get("HFA_LLM_PROVIDER", "anthropic").strip().lower()
     model = os.environ.get("HFA_MODEL", DEFAULT_MODEL).strip()
     if provider == "mock":
-        if mock_responder is None:
-            raise ValueError("mock provider needs a responder")
-        return MockClient(mock_responder)
+        return UnavailableClient("HFA_LLM_PROVIDER=mock is not accepted; use the --mock switch")
+    if provider not in ("anthropic", "openai_compat"):
+        return UnavailableClient(f"unknown HFA_LLM_PROVIDER: {provider}")
+    found = lookup_key(provider)
+    if not found.key:
+        return UnavailableClient(found.reason)
     if provider == "anthropic":
-        key = os.environ.get("HFA_API_KEY") or os.environ.get("ANTHROPIC_API_KEY")
-        if not key:
-            raise ValueError("set HFA_API_KEY (or ANTHROPIC_API_KEY)")
-        return AnthropicClient(model, key)
-    if provider == "openai_compat":
-        key = os.environ.get("HFA_API_KEY") or os.environ.get("OPENAI_API_KEY")
-        base = os.environ.get("HFA_OPENAI_BASE_URL", "")
-        if not key or not base:
-            raise ValueError("set HFA_API_KEY and HFA_OPENAI_BASE_URL")
-        return OpenAICompatClient(model, key, base)
-    raise ValueError(f"unknown HFA_LLM_PROVIDER: {provider}")
+        return AnthropicClient(model, found.key)
+    base = os.environ.get("HFA_OPENAI_BASE_URL", "")
+    if not base.startswith("https://"):
+        return UnavailableClient("openai_compat needs an https HFA_OPENAI_BASE_URL")
+    return OpenAICompatClient(model, found.key, base)

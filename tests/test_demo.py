@@ -48,10 +48,16 @@ class RealDemoWiringTests(unittest.TestCase):
         self.assertEqual(c["invoice"]["paypal"], "sandbox")
         self.assertTrue(os.path.exists(os.path.join(tmp.name, "data", "traces", "demo.jsonl")))
 
-    def test_real_mode_refuses_without_provider(self):
-        with mock.patch.dict(os.environ, {"HFA_LLM_PROVIDER": "mock"}):
-            with self.assertRaises(SystemExit):
-                demo.run_real(invoice=False)
+    def test_real_mode_with_provider_mock_is_unavailable_not_mock(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        cwd = os.getcwd()
+        os.chdir(tmp.name)
+        self.addCleanup(os.chdir, cwd)
+        with mock.patch.dict(os.environ, {"HFA_LLM_PROVIDER": "mock"}), \
+                mock.patch.object(demo, "LiveFetcher", lambda: StaticFetcher(page(RULE))):
+            c = demo.run_real(invoice=False)
+        self.assertEqual(c["llm"], "unavailable")
 
 
 if __name__ == "__main__":

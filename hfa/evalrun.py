@@ -218,6 +218,8 @@ def main(argv: Optional[list[str]] = None) -> int:
     ap.add_argument("--freeze", choices=["gate", "prompt"],
                     help="FINAL: record the decision-code (gate) or prompt hash; issued by the eval owner")
     ap.add_argument("--out", default="data/eval/runs")
+    ap.add_argument("--mock", action="store_true",
+                    help="run with the scripted mock proposer (labelled MOCK; not a measurement)")
     a = ap.parse_args(argv)
 
     if a.freeze:
@@ -229,6 +231,10 @@ def main(argv: Optional[list[str]] = None) -> int:
         holdout_mod.authorize_run("mock", a.frozen_prompt_sha)
     else:
         cases = dev_cases(load_cases(a.cases))
+    if not a.mock:
+        print("llm: unavailable - real-model eval runs are not enabled in this build; "
+              "pass --mock for the labelled pipeline test", file=sys.stderr)
+        return 2
     if not a.live and not os.path.isdir(a.snapshots):
         print(f"snapshot dir {a.snapshots!r} not found; use --live to fetch sources fresh", file=sys.stderr)
         return 2

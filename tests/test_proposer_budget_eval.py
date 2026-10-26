@@ -75,8 +75,12 @@ class ProposalParsingTests(unittest.TestCase):
 class BudgetTests(TmpDirCase):
     def test_default_model_is_haiku(self):
         self.assertEqual(DEFAULT_MODEL, "claude-haiku-4-5")
-        with mock.patch.dict(os.environ, {"HFA_LLM_PROVIDER": "anthropic", "HFA_API_KEY": "x"}, clear=False):
+        kf = os.path.join(self.tmp.name, "k.env")
+        with open(kf, "w") as f:
+            f.write("ANTHROPIC_API_KEY=test-not-a-real-key\n")
+        with mock.patch.dict(os.environ, {"HFA_ENV_FILE": kf}, clear=False):
             os.environ.pop("HFA_MODEL", None)
+            os.environ.pop("HFA_LLM_PROVIDER", None)
             self.assertEqual(client_from_env().label, "anthropic:claude-haiku-4-5")
 
     def test_cost_from_usage(self):

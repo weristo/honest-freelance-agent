@@ -46,7 +46,8 @@ def _budget(_a) -> int:
 def _paypal_smoke(_a) -> int:
     from .demo import load_dotenv
     from .paypal import SandboxClient, smoke_token
-    load_dotenv()
+    from .proposer.keys import key_file_path
+    load_dotenv(key_file_path())
     from .paypal.client import PayPalError
     try:
         out = smoke_token(SandboxClient.from_env())

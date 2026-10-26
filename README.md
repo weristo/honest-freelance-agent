@@ -104,11 +104,15 @@ inline elements do not (otherwise `Evectv.<sup>[3]</sup>` would break).
 
 ## Setup
 
-Python 3.11+ and nothing else for the core (standard library only).
+> **Requires Python 3.11 or newer (`python3.11+`).** On macOS the system
+> `python3` can be an old or broken build; call `python3.11` (or newer)
+> explicitly, as all commands below do.
+
+Nothing else is needed for the core (standard library only).
 
 ```bash
 git clone <this repo> && cd honest-freelance-agent
-python3 -m unittest discover -s tests -t .      # 125 tests, offline, no keys (1 skipped without the private snapshots)
+python3.11 -m unittest discover -s tests -t .      # 136 tests, offline, no keys (1 skipped without the private snapshots)
 ```
 
 ## Run
@@ -119,20 +123,30 @@ PayPal stand-in. It shows the pipeline (GO with invoice, REFUSE, UNVERIFIED
 paraphrase). It is not a measurement of anything.
 
 ```bash
-python3 -m hfa demo --mock
+python3.11 -m hfa demo --mock
 ```
 
-**Real mode - your own keys, one command.** Fill in `.env` (copy
-`.env.example`): a PayPal **sandbox** REST app (developer.paypal.com -> Apps
-& Credentials -> Sandbox) plus two sandbox personas, and your Anthropic key.
+**Real mode - your own keys, one command.** All keys live in ONE key file:
+`.env` in the repo folder (git-ignored), or any file you name with
+`HFA_ENV_FILE=/path/to/file`. Copy `.env.example` and fill in a PayPal
+**sandbox** REST app (developer.paypal.com -> Apps & Credentials -> Sandbox),
+two sandbox personas, and your Anthropic key as `ANTHROPIC_API_KEY=...`.
 
 ```bash
-cp .env.example .env          # set PAYPAL_CLIENT_ID, PAYPAL_CLIENT_SECRET,
+cp .env.example .env          # PAYPAL_CLIENT_ID, PAYPAL_CLIENT_SECRET,
                               # HFA_SANDBOX_MERCHANT_EMAIL, HFA_SANDBOX_BUYER_EMAIL,
-                              # HFA_LLM_PROVIDER=anthropic, HFA_API_KEY
-pip install anthropic         # only needed for the Anthropic provider
-python3 -m hfa demo --invoice
+                              # ANTHROPIC_API_KEY
+python3.11 -m pip install anthropic   # only needed for the Anthropic provider
+python3.11 -m hfa demo --invoice
+# or, with the key file elsewhere:
+HFA_ENV_FILE=~/my-keys/hfa.env python3.11 -m hfa demo --invoice
 ```
+
+The LLM key is read **only** from that file. A key that happens to be set in
+your shell (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, ...) is never used, and
+the key is never copied into the process environment. No file or no key ->
+every output says `"llm": "unavailable"` (CLI card, trace, usage log) and no
+model is called; the mock runs only when you pass `--mock`.
 
 This asks the model (default `claude-haiku-4-5`, budget-capped) whether the
 example request is allowed under the hackathon rules, fetches the rules page
@@ -143,29 +157,37 @@ decision. The trace goes to `data/traces/demo.jsonl` (redacted).
 Other commands:
 
 ```bash
-python3 -m hfa paypal-smoke   # sandbox OAuth token only: prints HTTP status + token length
-python3 -m hfa budget         # LLM spend vs. caps
+python3.11 -m hfa paypal-smoke   # sandbox OAuth token only: prints HTTP status + token length
+python3.11 -m hfa budget         # LLM spend vs. caps
 
 # Verify one quote against a live page (fresh fetch). On 2026-10-26 this
 # returned VERIFIED / MULTI_CONSISTENT: the URL appears in 4 code samples on
 # that page, none with a guard word or a differing amount.
-python3 -m hfa verify --url https://developer.paypal.com/api/rest/ \
+python3.11 -m hfa verify --url https://developer.paypal.com/api/rest/ \
   --quote "https://api-m.sandbox.paypal.com/v1/oauth2/token"
 
-python3 -m hfa eval --live    # mini-eval (mock proposer), sources fetched live
-                              # (implemented, not yet part of the test suite)
+python3.11 -m hfa eval --mock --live   # mini-eval (mock proposer, labelled MOCK),
+                                        # sources fetched live (not yet in the test suite)
 ```
 
 The PayPal client refuses any host other than `api-m.sandbox.paypal.com`
 (exact match, https, default port), at startup, in the constructor and
 before every request. There is no switch to turn this off.
 
-LLM settings: `HFA_LLM_PROVIDER` = `mock` (default) | `anthropic` |
-`openai_compat`; `HFA_MODEL` (default `claude-haiku-4-5`); `HFA_API_KEY`.
+LLM settings: `HFA_LLM_PROVIDER` = `anthropic` (default) | `openai_compat`
+(key `HFA_OPENAI_COMPAT_KEY` in the key file, plus `HFA_OPENAI_BASE_URL`);
+`HFA_MODEL` (default `claude-haiku-4-5`). There is no "mock" provider
+setting; the mock is only the explicit `--mock` switch.
 
 ## Cost guard
 
-Every real LLM call is metered from the provider's `usage` field. Hard caps:
+Every real LLM call is metered from the provider's `usage` field. Each call
+writes one line to the run log (`data/traces/demo.jsonl`): model, input and
+output tokens, and an **estimated** USD cost from Anthropic's list prices
+(Claude Haiku 4.5: USD 1 / 5 per million input / output tokens; the figure is
+labelled as an estimate, and an unpriced model logs tokens only). No key and
+no key identifier is ever logged. The daily and total counters below are
+computed from the same usage numbers. Hard caps:
 **USD 1 per UTC day, USD 15 in total**, stored in `data/llm_budget.json`
 (git-ignored). Env variables can only lower the caps. Before a call the
 worst case (input estimate + `max_tokens`) is reserved; if it does not fit,
@@ -201,7 +223,7 @@ pipeline test, not a model measurement"*. KILL<->REFUSE mix-ups are
 reported on their own line.
 
 Holdout: `data/eval/holdout_public.jsonl` (11 cases), pinned by SHA-256. The
-freeze has two final steps, issued by the eval owner: `python3 -m hfa eval
+freeze has two final steps, issued by the eval owner: `python3.11 -m hfa eval
 --freeze gate` (hash of the decision code) and `--freeze prompt` (hash of the
 proposer prompt). Each step only writes a file (`data/eval/FREEZE_GATE.json`
 or `data/eval/FREEZE_PROMPT.json`, created once, never overwritten); it

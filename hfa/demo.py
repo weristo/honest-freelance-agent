@@ -5,9 +5,11 @@
                                  hfa/demo_data/. PayPal is an in-memory fake.
                                  This shows the pipeline; it measures nothing.
 
-  python -m hfa demo [--invoice] the judge's own keys from .env: a real LLM
-                                 proposer (HFA_LLM_PROVIDER, default model
-                                 claude-haiku-4-5, budget-capped), live fetch of
+  python -m hfa demo [--invoice] the judge's own keys from the key file
+                                 (HFA_ENV_FILE, or ./.env): a real LLM proposer
+                                 (default model claude-haiku-4-5, budget-capped;
+                                 no key -> "llm: unavailable", never a silent
+                                 mock), live fetch of
                                  the real source, verifier + gate, and with
                                  --invoice a PayPal SANDBOX invoice (draft ->
                                  send -> status) when, and only when, the gate
@@ -24,6 +26,7 @@ from .paypal.client import SandboxClient, build_invoice, invoice_for_decision
 from .pipeline import RunResult, run
 from .proposer.base import Proposer
 from .proposer.budget import Budget
+from .proposer.keys import KEY_NAMES, key_file_path
 from .proposer.providers import MockClient, client_from_env
 
 MOCK_BANNER = "llm: mock - scripted demo of the pipeline, NOT a model measurement"
@@ -47,6 +50,8 @@ def load_dotenv(path: str = ".env") -> None:
                 continue
             k, v = line.split("=", 1)
             k, v = k.strip(), v.strip().strip('"').strip("'")
+            if k in KEY_NAMES.values():
+                continue            # LLM keys stay in the file; they are never exported
             if k and v and k not in os.environ:
                 os.environ[k] = v
 
@@ -162,13 +167,14 @@ def run_mock() -> list[dict]:
 # --- real mode ----------------------------------------------------------------
 
 def run_real(invoice: bool, request: Optional[str] = None, sources: Optional[list[str]] = None) -> dict:
-    load_dotenv()
-    if os.environ.get("HFA_LLM_PROVIDER", "mock").lower() == "mock":
-        raise SystemExit("set HFA_LLM_PROVIDER=anthropic (and HFA_API_KEY) in .env, or use --mock")
-    proposer = Proposer(client_from_env(), Budget())
-    res = run(request or REAL_REQUEST, sources or REAL_SOURCES, proposer, LiveFetcher(),
-              trace_path=os.path.join("data", "traces", "demo.jsonl"))
+    load_dotenv(key_file_path())   # PayPal settings (the LLM key is read separately)
+    trace = os.path.join("data", "traces", "demo.jsonl")
+    proposer = Proposer(client_from_env(), Budget(), usage_log=trace)
+    res = run(request or REAL_REQUEST, sources or REAL_SOURCES, proposer, LiveFetcher(), trace_path=trace)
     c = card(res)
+    if res.status == "unavailable":
+        c["banner"] = "llm: unavailable - no key file / no key; nothing was sent to any model"
+    c["usage"] = getattr(proposer, "last_usage", None)
     if invoice:
         if not res.decision or res.decision.final.value != "GO":
             c["invoice"] = "not created: the gate did not say GO"
