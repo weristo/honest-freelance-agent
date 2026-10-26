@@ -96,10 +96,17 @@ def naive_proposal(case: dict) -> dict:
         claims.append({"claim_id": f"{case['id']}_i{j}", "text": inf["text"], "kind": "INFERENCE",
                        "critical": True, "polarity": "SUPPORTS",
                        "derived_from": [f"{case['id']}_c{k}" for k in inf.get("derived_from", [])]})
-    if case.get("user_attested"):
-        claims.append({"claim_id": f"{case['id']}_u0", "text": case["user_attested"],
+    if case.get("user_attested") or case.get("calc"):
+        claims.append({"claim_id": f"{case['id']}_u0", "text": case.get("user_attested") or case["input"],
                        "kind": "USER_ATTESTED", "critical": True, "polarity": "SUPPORTS",
                        "user_confirmed": True})
+    if case.get("calc"):
+        spec = json.loads(json.dumps(case["calc"]))
+        for inp in spec["inputs"].values():
+            src = inp["source"]
+            inp["source"] = f"{case['id']}_u0" if src == "user" else f"{case['id']}_c{src}"
+        claims.append({"claim_id": f"{case['id']}_k0", "text": "calculation", "kind": "CALC",
+                       "critical": True, "polarity": "SUPPORTS", "calc": spec})
     return {"decision": decision, "kill_class": kill, "rationale": "mock", "claims": claims}
 
 
@@ -208,12 +215,13 @@ def main(argv: Optional[list[str]] = None) -> int:
     ap.add_argument("--live", action="store_true", help="fetch sources live instead of snapshots")
     ap.add_argument("--holdout", metavar="FILE", help="holdout file (pinned hash; frozen, real model, once)")
     ap.add_argument("--frozen-prompt-sha")
-    ap.add_argument("--freeze", action="store_true", help="record prompt + decision-code hashes (final)")
+    ap.add_argument("--freeze", choices=["gate", "prompt"],
+                    help="FINAL: record the decision-code (gate) or prompt hash; issued by the eval owner")
     ap.add_argument("--out", default="data/eval/runs")
     a = ap.parse_args(argv)
 
     if a.freeze:
-        print(json.dumps(holdout_mod.freeze(), indent=1))
+        print(json.dumps(holdout_mod.freeze(a.freeze), indent=1))
         return 0
     if a.holdout:
         cases = holdout_mod.load_holdout(a.holdout)

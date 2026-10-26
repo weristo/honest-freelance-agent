@@ -17,6 +17,7 @@ class ClaimKind(str, enum.Enum):
     FACT = "FACT"                    # quotable, checked by the verifier
     INFERENCE = "INFERENCE"          # reasoning; never VERIFIED
     USER_ATTESTED = "USER_ATTESTED"  # the user's own statement; never VERIFIED
+    CALC = "CALC"                    # arithmetic over other claims, done by code
 
 
 class Polarity(str, enum.Enum):
@@ -77,6 +78,7 @@ class Claim:
     source_domain_type: str = "general"   # "legal" sources get a staleness check
     first_seen_snippet_sha256: Optional[str] = None
     user_confirmed: bool = False          # USER_ATTESTED: explicit user tick
+    calc: Optional[dict] = None           # CALC: inputs / steps / claimed / check
 
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> "Claim":
@@ -125,10 +127,12 @@ class Decision:
     human_required: bool = False
     evidence: list[Evidence] = field(default_factory=list)
     claims: list[Claim] = field(default_factory=list)
+    calcs: list[dict] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "decision_id": self.decision_id,
+            "calcs": list(self.calcs),
             "llm": self.llm,
             "proposed": self.proposed.value,
             "final": self.final.value,

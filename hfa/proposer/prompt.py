@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 
-PROMPT_VERSION = "p1"
+PROMPT_VERSION = "p2"
 
 SYSTEM_PROMPT = """You are the proposer in an honest freelance agent.
 You read a freelance opportunity (or a quote / invoice step) and the platform
@@ -24,8 +24,16 @@ Rules:
   argues against the user's plan.
 - Reasoning that combines facts (arithmetic, "these two rules conflict") is
   a claim with kind "INFERENCE" and "derived_from" listing claim ids.
-- Statements only the user can know (their income, their client history)
-  are kind "USER_ATTESTED".
+- Statements only the user can know (their income, their client history,
+  the job's price, their own cost) are kind "USER_ATTESTED".
+- If the decision depends on money (fees, net pay, thresholds), add a claim
+  of kind "CALC". Do the sum yourself in "claimed", but code will redo it:
+  "calc": {"inputs": {name: {"literal": text exactly as in the source claim,
+  "source": claim_id}}, "steps": [[name, expression]], "claimed": {name: value},
+  "check": [name, ">=" | "<=" | ">" | "<", name], "on_fail": "NOT_WORTH" or
+  "RULE_VIOLATION"}. Expressions may use only numbers, names, + - * / ( ),
+  max() and min(). Every input must come from a FACT quote or a USER_ATTESTED
+  claim and its literal must appear there verbatim (e.g. "10%", "$5.00").
 - If you cannot find a quotable source, say so: decision "NEEDS_HUMAN".
 Return ONLY a JSON object matching the schema. No prose outside JSON."""
 
@@ -46,7 +54,7 @@ OUTPUT_SCHEMA = {
                 "properties": {
                     "claim_id": {"type": "string"},
                     "text": {"type": "string"},
-                    "kind": {"enum": ["FACT", "INFERENCE", "USER_ATTESTED"]},
+                    "kind": {"enum": ["FACT", "INFERENCE", "USER_ATTESTED", "CALC"]},
                     "critical": {"type": "boolean"},
                     "quote": {"type": "string"},
                     "source_url": {"type": "string"},
@@ -54,6 +62,7 @@ OUTPUT_SCHEMA = {
                     "rule_topic": {"type": "string"},
                     "polarity": {"enum": ["SUPPORTS", "CONTRADICTS"]},
                     "derived_from": {"type": "array", "items": {"type": "string"}},
+                    "calc": {"type": "object"},
                 },
             },
         },

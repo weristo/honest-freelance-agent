@@ -51,11 +51,29 @@ time, or it says plainly that it could not check.
        (require_verified_go() re-checks the evidence before any call)
 ```
 
-Gate rules: **G1** a verified critical fact that contradicts the plan -> KILL.
+Gate rules: **C0** arithmetic (CALC claims, below) is checked first: bad
+inputs or a sum that differs from what the proposer claimed -> NEEDS_HUMAN;
+a failed check (e.g. net pay below your minimum) -> KILL (NOT_WORTH) even if
+the proposer said GO. **G1** a verified critical fact that contradicts the plan -> KILL.
 **G2** GO only if every critical fact is VERIFIED and there is at least one.
 **G3** any critical NEEDS_HUMAN, or a decision resting on an INFERENCE ->
 NEEDS_HUMAN. **G4** any critical UNVERIFIED -> no GO. **G5** facts only the
 user knows (USER_ATTESTED) are never VERIFIED and need an explicit tick.
+**G6** a GO that rests on a money amount or percentage needs a passing CALC.
+
+### CALC: the code does the sums
+A CALC claim names a formula and its inputs, e.g. `fee = max(rate * price,
+minfee)`, `net = price - fee`, check `net >= cost`. Each input must point at
+a VERIFIED quote that contains the number verbatim (`"10%"`, `"$5.00"`) or
+at a USER_ATTESTED statement (`"the job pays 30 USD"`). The code parses the
+numbers itself and evaluates the formula with its own small parser (no
+`eval()`; only `+ - * /`, parentheses, `max`, `min`; `decimal.Decimal`).
+
+**What this guarantees and what it does not:** the code guarantees the
+arithmetic for the stated formula and inputs. Reading the formula out of the
+quoted rule (that "10% or $5.00, whichever is greater" means
+`max(0.10 * price, 5.00)`) is an INFERENCE by the model, it is not verified,
+and the decision card labels it that way.
 
 Reason codes: `EXACT_MATCH`, `NO_MATCH`, `QUOTE_TOO_SHORT`, `URL_REFUSED`,
 `FETCH_FAILED`, `FETCH_BLOCKED` (403/429, captcha, login wall, robots.txt -
@@ -88,7 +106,7 @@ Python 3.11+ and nothing else for the core (standard library only).
 
 ```bash
 git clone <this repo> && cd honest-freelance-agent
-python3 -m unittest discover -s tests -t .      # 87 tests, offline, no keys
+python3 -m unittest discover -s tests -t .      # 109 tests, offline, no keys
 ```
 
 ## Run
@@ -154,12 +172,20 @@ in the CLI output and in the trace.
 
 ## Mini-eval
 
-`data/eval/cases_public.jsonl`: 40 cases (hackathon rules, platform fees,
+`data/eval/cases_public.jsonl`: 40 dev cases (hackathon rules, platform fees,
 platform terms, tax thresholds, payments) with gold labels GO / KILL /
 REFUSE / NEEDS_HUMAN / UNVERIFIED. Third-party text is not redistributed:
 each quote is cut to at most 200 characters and stored with the SHA-256 of
 the full quote and the hashes recorded at fetch time (2026-10-04). The full
-snapshots stay outside the repository (`data/private/`); `--live` re-fetches.
+snapshots stay outside the repository (`data/private/`, `eval_snapshots/`
+are git-ignored).
+
+**Reproducibility, plainly:** without those snapshots a judge cannot
+reproduce the eval byte for byte, because the pages have changed since
+2026-10-04 and their full text is not ours to redistribute. What a judge can
+check: the verifier fetches every source fresh (`hfa verify --url`, `hfa eval
+--live`), and the stored quote hashes and fetch-time hashes show what was
+matched then.
 
 Metric: **false-GO rate** = GO given when gold is not GO, divided by the
 number of non-GO cases. Reported next to it: false-KILL count and deferral
@@ -172,18 +198,21 @@ rows; mock results go only to a separate table with the banner *"MOCK -
 pipeline test, not a model measurement"*. KILL<->REFUSE mix-ups are
 reported on their own line.
 
-Holdout: `data/eval/holdout_public.jsonl` (11 cases), pinned by SHA-256. It
-runs only after `python3 -m hfa eval --freeze` has recorded the prompt hash
-and the decision-code hash, only if both still match, never with the mock,
-and only once. Every gold or coding change before the freeze is logged in
+Holdout: `data/eval/holdout_public.jsonl` (11 cases), pinned by SHA-256. The
+freeze has two final steps, issued by the eval owner: `python3 -m hfa eval
+--freeze gate` (hash of the decision code) and `--freeze prompt` (hash of the
+proposer prompt). The holdout runs only when both exist and still match,
+never with the mock, and only once. Not frozen yet. Every gold or coding change before the freeze is logged in
 [EVAL_CHANGELOG.md](EVAL_CHANGELOG.md), including whether it was made after
 seeing mock results.
 
 Current numbers are **mock only** (a stand-in that says GO on every trap
-case), dev set: without verifier 32/35 false GO; with verifier + gate 1/35
-(T16: the fee quote is correct, the loss is arithmetic the gate cannot see),
-false KILL 0/5, deferral 3/24, KILL<->REFUSE mix-ups 2. This shows that the
-pipeline wiring works; it says nothing about any real model.
+case), dev set: without verifier 32/35 false GO; with verifier + gate + CALC
+0/35, false KILL 0/5, deferral 6/24, KILL<->REFUSE mix-ups 0. Four of the
+five gold-GO cases are deferred (guard words, or an amount without a CALC).
+This shows that the pipeline wiring works; it says nothing about any real
+model. The history of every change, including the ones made after looking
+at mock numbers, is in EVAL_CHANGELOG.md.
 
 ## Limitations (honest list)
 
@@ -197,11 +226,15 @@ pipeline wiring works; it says nothing about any real model.
 - The domain check uses the last two host labels (no public suffix list).
 - DNS is resolved for the SSRF check and again for the connection
   (rebinding window).
-- REFUSE vs KILL comes from a URL-pattern registry; a fee or threshold page
-  that happens to live under `/terms` or on a tax-authority domain is
-  treated as a policy document.
-- "NOT_WORTH" decisions rest on arithmetic; unless the proposer states that
-  arithmetic as an INFERENCE claim, the gate cannot catch a wrong sum.
+- REFUSE vs KILL comes from a URL-pattern registry; a contradicting quote
+  from a page under `/terms` or on a tax-authority domain counts as a policy
+  document. When a CALC decides the case (e.g. a fee table on a terms page),
+  the registry is not consulted and the result is KILL (NOT_WORTH).
+- CALC checks the sums, not the formula: a wrong reading of a fee rule gives
+  a correctly computed wrong answer. Literal parsing handles common formats
+  (`10%`, `$5.00`, `3,40%`, `25 000`) but not words ("twenty").
+- The "GO rests on an amount" test (G6) looks for currency signs, codes and
+  percentages in the supporting quotes; an amount written in words slips by.
 
 ## License
 

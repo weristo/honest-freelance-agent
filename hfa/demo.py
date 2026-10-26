@@ -58,11 +58,31 @@ def _claim(cid, quote, polarity="SUPPORTS", kind="FACT"):
             "source_url": DEMO_URL, "rule_id": "EXAMPLE-TERMS", "polarity": polarity}
 
 
+def _user(cid, text):
+    return {"claim_id": cid, "text": text, "kind": "USER_ATTESTED", "critical": True,
+            "polarity": "SUPPORTS", "user_confirmed": True}
+
+
+def _net_calc(cid, amount, minimum, claimed_net):
+    return {"claim_id": cid, "text": "net after the platform fee vs. my minimum", "kind": "CALC",
+            "critical": True, "polarity": "SUPPORTS", "calc": {
+                "inputs": {"rate": {"literal": "8%", "source": "c2"},
+                           "amount": {"literal": amount, "source": "u1"},
+                           "minimum": {"literal": minimum, "source": "u1"}},
+                "steps": [["fee", "rate * amount"], ["net", "amount - fee"]],
+                "claimed": {"net": claimed_net}, "check": ["net", ">=", "minimum"], "on_fail": "NOT_WORTH"}}
+
+
+FEE_QUOTE = "For fixed price projects the freelancer service fee is 8% of the project amount."
+
+
 MOCK_SCENARIOS = [
     ("Invoice my client for the finished logo milestone (USD 120) through PayPal.",
      {"decision": "GO", "rationale": "Invoicing completed milestones is allowed.", "claims": [
          _claim("c1", "Freelancers may invoice clients for completed milestones through a supported payment provider."),
-         _claim("c2", "For fixed price projects the freelancer service fee is 8% of the project amount.")]}),
+         _claim("c2", FEE_QUOTE),
+         _user("u1", "The milestone is 120 USD and I need at least 100 USD net."),
+         _net_calc("k1", "120", "100", "110.40")]}),
     ("Write a bot that bids on every new project for me.",
      {"decision": "GO", "rationale": "(the mock pretends to be over-eager)", "claims": [
          _claim("c1", "You may not use automated software to submit bids or proposals on behalf of other users.",
@@ -70,6 +90,11 @@ MOCK_SCENARIOS = [
     ("The marketplace only takes 5%, so price the quote on that.",
      {"decision": "GO", "rationale": "(the mock paraphrases a fee from memory)", "claims": [
          _claim("c1", "The freelancer service fee is only 5% for fixed price projects.")]}),
+    ("A 30 USD fixed price job; my own cost is 29 USD. Take it?",
+     {"decision": "GO", "rationale": "(the mock says GO; the code does the sum)", "claims": [
+         _claim("c2", FEE_QUOTE),
+         _user("u1", "The job pays 30 USD and my own cost is 29 USD."),
+         _net_calc("k1", "30", "29", "27.60")]}),
 ]
 
 
@@ -106,6 +131,9 @@ def card(res: RunResult) -> dict:
     if d:
         out.update(final=d.final.value, kill_class=d.kill_class.value if d.kill_class else None,
                    proposed=d.proposed.value, gate_log=d.gate_log,
+                   calcs=[dict(c, derivation="INFERENCE - reading the formula from the quote is reasoning, "
+                                             "not verified; code guarantees only the arithmetic")
+                          for c in d.calcs],
                    receipts=[{"claim": e.claim_id, "state": e.state.value, "reason": e.reason_code.value,
                               "layer": e.match_layer, "snippet_sha256": (e.snippet_sha256 or "")[:12],
                               "fetched_at": e.fetched_at, "nearest_span": e.nearest_span,

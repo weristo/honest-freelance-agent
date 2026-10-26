@@ -93,7 +93,8 @@ class RegistryTests(unittest.TestCase):
 class HoldoutTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
-        self.freeze = os.path.join(self.tmp.name, "FREEZE.json")
+        self.paths = {"gate": os.path.join(self.tmp.name, "FREEZE_GATE.json"),
+                      "prompt": os.path.join(self.tmp.name, "FREEZE_PROMPT.json")}
         self.lock = os.path.join(self.tmp.name, "HOLDOUT_RUN.json")
 
     def tearDown(self):
@@ -117,30 +118,40 @@ class HoldoutTests(unittest.TestCase):
         with self.assertRaises(holdout.HoldoutHashMismatch):
             holdout.load_holdout(p)
 
-    def test_run_requires_freeze_real_model_matching_hash_and_runs_once(self):
-        with self.assertRaises(holdout.HoldoutLocked):              # not frozen
-            holdout.authorize_run("anthropic:claude-haiku-4-5", None, self.freeze, self.lock)
-        rec = holdout.freeze(self.freeze)
-        with self.assertRaises(holdout.HoldoutLocked):              # freeze is final
-            holdout.freeze(self.freeze)
+    def test_two_step_freeze_real_model_matching_hash_and_runs_once(self):
+        llm = "anthropic:claude-haiku-4-5"
+        with self.assertRaises(holdout.HoldoutLocked):              # nothing frozen
+            holdout.authorize_run(llm, None, self.paths, self.lock)
+        holdout.freeze("gate", self.paths)
+        with self.assertRaises(holdout.HoldoutLocked):              # prompt not frozen yet
+            holdout.authorize_run(llm, None, self.paths, self.lock)
+        rec = holdout.freeze("prompt", self.paths)
+        for kind in ("gate", "prompt"):
+            with self.assertRaises(holdout.HoldoutLocked):          # each freeze is final
+                holdout.freeze(kind, self.paths)
         with self.assertRaises(holdout.HoldoutLocked):              # never mock
-            holdout.authorize_run("mock", rec["prompt_sha256"], self.freeze, self.lock)
+            holdout.authorize_run("mock", rec["prompt_sha256"], self.paths, self.lock)
         with self.assertRaises(holdout.HoldoutLocked):              # wrong prompt hash
-            holdout.authorize_run("anthropic:claude-haiku-4-5", "0" * 64, self.freeze, self.lock)
-        holdout.authorize_run("anthropic:claude-haiku-4-5", rec["prompt_sha256"], self.freeze, self.lock)
+            holdout.authorize_run(llm, "0" * 64, self.paths, self.lock)
+        holdout.authorize_run(llm, rec["prompt_sha256"], self.paths, self.lock)
         holdout.record_run({"n": 11}, self.lock)
         with self.assertRaises(holdout.HoldoutLocked):              # only once
-            holdout.authorize_run("anthropic:claude-haiku-4-5", rec["prompt_sha256"], self.freeze, self.lock)
+            holdout.authorize_run(llm, rec["prompt_sha256"], self.paths, self.lock)
 
-    def test_code_change_after_freeze_refused(self):
-        rec = holdout.freeze(self.freeze)
-        with open(self.freeze) as f:
+    def test_code_change_after_gate_freeze_refused(self):
+        holdout.freeze("gate", self.paths)
+        rec = holdout.freeze("prompt", self.paths)
+        with open(self.paths["gate"]) as f:
             d = json.load(f)
         d["decision_code_sha256"] = "1" * 64
-        with open(self.freeze, "w") as f:
+        with open(self.paths["gate"], "w") as f:
             json.dump(d, f)
         with self.assertRaises(holdout.HoldoutLocked):
-            holdout.authorize_run("anthropic:claude-haiku-4-5", rec["prompt_sha256"], self.freeze, self.lock)
+            holdout.authorize_run("anthropic:claude-haiku-4-5", rec["prompt_sha256"], self.paths, self.lock)
+
+    def test_bad_freeze_kind(self):
+        with self.assertRaises(ValueError):
+            holdout.freeze("all", self.paths)
 
     def test_cli_holdout_with_mock_is_refused(self):
         with self.assertRaises(holdout.HoldoutLocked):
@@ -160,6 +171,18 @@ class GoldChangeTests(unittest.TestCase):
         prop = evalrun.naive_proposal(t06)
         kinds = [(c["kind"], c["critical"]) for c in prop["claims"]]
         self.assertIn(("INFERENCE", True), kinds)
+
+    def test_t16_t21_calc_and_t30_inference_coding(self):
+        for cid in ("T16", "T21"):
+            prop = evalrun.naive_proposal(self._case(cid))
+            calc = [c for c in prop["claims"] if c["kind"] == "CALC"]
+            self.assertEqual(len(calc), 1, cid)
+            ids = {c["claim_id"] for c in prop["claims"]}
+            self.assertTrue(all(i["source"] in ids for i in calc[0]["calc"]["inputs"].values()), cid)
+        t30 = self._case("T30")
+        self.assertEqual([c["role"] for c in t30["claims"]], ["CONTEXT", "CONTEXT"])
+        self.assertEqual(t30["gold"], "KILL")
+        self.assertIn(("INFERENCE", True), [(c["kind"], c["critical"]) for c in evalrun.naive_proposal(t30)["claims"]])
 
     def test_mixups_reported_separately(self):
         rows = [{"id": "a", "llm": "mock", "gold": "REFUSE", "status": "ok", "no_verifier": "GO", "verifier": "KILL"},

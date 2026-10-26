@@ -5,7 +5,19 @@ freeze** is listed here: what changed, why, when, and whether it was made
 after looking at mock-run results. Changes made after seeing results are a
 form of tuning on the dev set; the holdout set (`data/eval/holdout_public.jsonl`,
 pinned SHA-256, run once after the freeze, never with the mock) is the
-counterweight. Status: **not frozen yet** (no `data/eval/FREEZE.json`).
+counterweight. Status: **not frozen yet**. The freeze has two steps and is
+issued by the eval owner (002), not by the coding agent: `python -m hfa eval
+--freeze gate` (decision code; target 2026-10-27 evening) and `python -m hfa
+eval --freeze prompt` (proposer prompt; by 2026-10-30 at the latest). Neither
+has been run.
+
+Holdout file hashes (SHA-256): private full file
+`0b7ae93043edd4693926f8af99b9819d36d6755e5e7b8cf385719fb577394994` (outside
+the repo); public file `data/eval/holdout_public.jsonl`
+`886c9636b1915e2e5d81de6278542e86b70816fbc631082bb90be29506f989d3`
+(committed; quotes <=200 chars + SHA-256 of the full quote). Full page
+snapshots (`eval_snapshots/*.txt`, third-party text) are git-ignored and not
+in the repository (`git ls-files` checked: 0 files).
 
 All numbers below come from the **mock** proposer (a stand-in that says GO on
 every case flagged as a false-GO trap). They test the wiring, not a model.
@@ -21,6 +33,14 @@ every case flagged as a false-GO trap). They test the wiring, not a model.
 | E7 | 2026-10-26 | gold | T05: gold NEEDS_HUMAN -> **KILL (RULE_VIOLATION)**. The source is the hackathon's rules page (devpost /rules), not a terms-of-service document. | Coordinator decision (002). The earlier NEEDS_HUMAN rested on an internal team rule that is not part of the case. | Yes (round-1 mock gave KILL). |
 | E8 | 2026-10-26 | case coding | T06: the "solely owned" quote's role CONTRADICTS -> CONTEXT; added a critical INFERENCE claim ("the OAH promotional licence conflicts with 'solely owned'", derived from both quotes) so G3 applies. Gold stays NEEDS_HUMAN. | Coordinator decision (002): the conflict is a conclusion, not a quotable fact. | Yes (round-1 mock gave KILL). |
 
+| E9 | 2026-10-26 | code (new capability) + case coding | **CALC claims** (`hfa/calc.py`): the proposer states formula and inputs; every input points at a VERIFIED FACT (literal must appear in its quote) or a USER_ATTESTED claim; code evaluates with its own tokenizer/parser (no `eval()`, only + - * / max min, `Decimal`). Gate rule C0: invalid inputs -> NEEDS_HUMAN (CALC_INVALID); code result != proposer's claimed result -> NEEDS_HUMAN (CALC_MISMATCH); failed check (e.g. net < cost) -> KILL (NOT_WORTH) even if the proposer said GO. Case T16 coded with a CALC (fee = max(10% x 30, $5.00), net = 30 - fee, check net >= 26). | Coordinator decision (002). | **Yes: a new capability built after the mock result** (round 2 showed T16 as the one false GO). |
+| E10 | 2026-10-26 | code (gate precedence) + case coding | When a CALC check fails, the result is KILL (NOT_WORTH) and the source registry is not consulted (C0 runs before G1). T21 coded with a CALC (20% fee on 200 -> net 160 < 170). | Coordinator decision (002): a fee table on a /terms page is an economic rule, not a prohibition. | Yes (round 2: T21 REFUSE vs gold KILL). |
+| E11 | 2026-10-26 | case coding | T30: the NAV quote's role CONTRADICTS -> CONTEXT; added a critical INFERENCE claim ("70 000 EUR > HUF 20 million at any rate above 286 HUF/EUR") -> G3 -> NEEDS_HUMAN. Gold stays KILL; the result counts as a deferral, not an error (as gold_detail already said). | Coordinator decision (002): same coding error as T06. | Yes (round 2: T30 REFUSE). |
+| E12 | 2026-10-26 | code (gate) | Rule G6: a GO whose critical supporting FACT quote or USER_ATTESTED text states a money amount or percentage needs a passing CALC, otherwise NEEDS_HUMAN. `require_verified_go()` re-checks CALCs and G6. | Coordinator decision (002). | Yes (follows E9). Effect on the mock run: T31 and T35 (gold GO, no CALC coded) are now deferred; they were deliberately **not** given CALC coding after seeing this. |
+| E13 | 2026-10-26 | prompt | Proposer prompt p1 -> p2: CALC instructions and `calc` in the output schema. Prompt hash now `b893d3422d6a...`. | Needed for E9. | No results exist for any real model; prompt freeze still pending. |
+| E14 | 2026-10-26 | code (eval) | Freeze split into two final steps (`--freeze gate`, `--freeze prompt`); the frozen decision code now includes `calc.py`. The holdout needs both. Prepared, not run. | Coordinator decision (002). | No. |
+| E15 | 2026-10-26 | repo hygiene | `.gitignore` covers `eval_snapshots/` anywhere and `data/private/`; public holdout file committed with both hashes recorded above. | Coordinator decision (002). | No. |
+
 ## Mock results by stage (dev set, 40 cases, MOCK - not a model measurement)
 
 | Stage | false GO (verifier) | false KILL | deferral | KILL<->REFUSE | exact |
@@ -28,10 +48,15 @@ every case flagged as a false-GO trap). They test the wiring, not a model.
 | Round 1 first run (before E1, E2) | 0/35 | 0/5 | 13/23 | 6 | 21/40 |
 | Round 1 final (E1, E2) | 0/35 | 0/5 | 5/23 | 6 | 24/40 |
 | Round 2 (E3-E8) | **1/35** (T16) | 0/5 | 3/24 | 2 | 31/40 |
+| Round 3 (E9-E15) | 0/35 | 0/5 | 6/24 | 0 | 31/40 |
 
 Without the verifier the same mock gives 32/35 false GO in every stage.
 The round-2 rise from 0 to 1 false GO is kept on purpose and reported: the
 earlier 0 depended on a guard word that happened to be near the T16 quote.
 
+Round 3 deferrals of gold-GO cases: T01, T04 (guard word in the next
+sentence), T31, T35 (G6: amount without CALC). T16 is now KILL (NOT_WORTH)
+via CALC, T21 KILL (NOT_WORTH) via CALC, T30 NEEDS_HUMAN via INFERENCE.
+
 Fingerprint at the time of writing (not a freeze): prompt
-`19d1e6930602...`, decision code `d10648785255...`.
+`b893d3422d6a...`, decision code `4f269115d665...`.

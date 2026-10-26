@@ -12,3 +12,6 @@ __pycache__/
 *.pyc
 .venv/
 *.egg-info/
+# full third-party page snapshots never go into the repository
+eval_snapshots/
+**/eval_snapshots/

@@ -16,11 +16,13 @@ class MockDemoTests(unittest.TestCase):
     def test_mock_demo_is_labelled_and_offline(self):
         cards = demo.run_mock()
         self.assertTrue(all(c["llm"] == "mock" and c["banner"] == demo.MOCK_BANNER for c in cards))
-        self.assertEqual([c["final"] for c in cards], ["GO", "KILL", "NEEDS_HUMAN"])
+        self.assertEqual([c["final"] for c in cards], ["GO", "KILL", "NEEDS_HUMAN", "KILL"])
         self.assertEqual(cards[1]["kill_class"], "POLICY_REFUSAL")
         self.assertEqual(cards[0]["invoice"]["paypal"], "mock (no network)")
         self.assertNotIn("invoice", cards[1])
         self.assertNotIn("invoice", cards[2])
+        self.assertEqual(cards[3]["kill_class"], "NOT_WORTH")       # 30 - 8% = 27.60 < 29
+        self.assertEqual(cards[3]["calcs"][0]["values"]["net"], "27.60")
 
 
 class RealDemoWiringTests(unittest.TestCase):

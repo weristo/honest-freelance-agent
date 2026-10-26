@@ -1,4 +1,9 @@
-"""Deterministic decision gate (rules G1-G5) and the GO enforcement point.
+"""Deterministic decision gate (rules C0, G1-G6) and the GO enforcement point.
+
+Order: C0 (CALC claims: invalid or mismatching arithmetic -> NEEDS_HUMAN; a
+failed check -> KILL with the CALC's kill class, before G1 and without
+consulting the source registry), then G1-G5, then G6 (a GO that rests on a
+money amount or percentage needs a passing CALC).
 
 The proposer (LLM) only *proposes* GO/KILL/NEEDS_HUMAN. The final verdict is
 computed here from the claim list and the verifier's evidence. Any action
@@ -11,6 +16,7 @@ from __future__ import annotations
 import uuid
 from typing import Optional
 
+from .calc import has_amount, run_calc
 from .registry import is_policy_source, policy_reason
 from .models import (Claim, ClaimKind, Decision, Evidence, EvidenceState,
                      KillClass, Polarity, Verdict)
@@ -22,6 +28,18 @@ class GoNotAllowed(Exception):
 
 def _critical_facts(claims, ev):
     return [(c, ev.get(c.claim_id)) for c in claims if c.critical and c.kind == ClaimKind.FACT]
+
+
+def _calcs(claims, ev):
+    by_id = {c.claim_id: c for c in claims}
+    return [run_calc(c, by_id, ev) for c in claims if c.critical and c.kind == ClaimKind.CALC]
+
+
+def _amount_based(claims) -> bool:
+    return any(c.critical and c.polarity == Polarity.SUPPORTS and
+               ((c.kind == ClaimKind.FACT and has_amount(c.quote)) or
+                (c.kind == ClaimKind.USER_ATTESTED and has_amount(c.text)))
+               for c in claims)
 
 
 def _no_llm_refusal(kc: Optional[KillClass]) -> Optional[KillClass]:
@@ -38,10 +56,30 @@ def decide(proposed: Verdict, claims: list[Claim], evidence: list[Evidence], llm
     log: list[str] = []
     facts = _critical_facts(claims, ev)
 
+    calcs = _calcs(claims, ev)
+
     def done(final: Verdict, kill: Optional[KillClass] = None) -> Decision:
         return Decision(decision_id or f"d_{uuid.uuid4().hex[:10]}", proposed, final, llm,
                         kill_class=kill, gate_log=log, human_required=(final == Verdict.NEEDS_HUMAN),
-                        evidence=evidence, claims=claims)
+                        evidence=evidence, claims=claims, calcs=[r.__dict__ for r in calcs])
+
+    # C0: arithmetic is done by code. Bad or disputed sums go to a human; a
+    # failed check kills the plan whatever the proposer said, and the source
+    # registry is not consulted (a fee table is an economic rule, not a ban).
+    bad = [r for r in calcs if r.status == "INVALID"]
+    if bad:
+        log.append(f"C0 fail: CALC_INVALID {[(r.claim_id, r.detail) for r in bad]}")
+        return done(Verdict.NEEDS_HUMAN)
+    mism = [r for r in calcs if r.status == "MISMATCH"]
+    if mism:
+        log.append(f"C0 fail: CALC_MISMATCH {[(r.claim_id, r.detail) for r in mism]}")
+        return done(Verdict.NEEDS_HUMAN)
+    failed = [r for r in calcs if r.check_passed is False]
+    if failed:
+        log.append(f"C0 fail: check failed {[(r.claim_id, r.detail, r.values) for r in failed]}")
+        return done(Verdict.KILL, KillClass(failed[0].on_fail))
+    if calcs:
+        log.append(f"C0 pass: {[(r.claim_id, r.detail) for r in calcs]}")
 
     # G1: a verified critical fact that contradicts the request kills it.
     contra = [c for c, e in facts if c.polarity == Polarity.CONTRADICTS
@@ -93,6 +131,11 @@ def decide(proposed: Verdict, claims: list[Claim], evidence: list[Evidence], llm
         log.append("G2 fail: GO proposed with zero critical facts")
         return done(Verdict.NEEDS_HUMAN)
     log.append(f"G2 pass: {len(facts)} critical fact(s) VERIFIED")
+
+    # G6: a GO that rests on an amount needs a passing CALC.
+    if _amount_based(claims) and not any(r.check_passed for r in calcs):
+        log.append("G6 fail: GO depends on an amount/percentage but no passing CALC")
+        return done(Verdict.NEEDS_HUMAN)
     return done(Verdict.GO)
 
 
@@ -112,3 +155,8 @@ def require_verified_go(decision: Decision) -> None:
     if any(c.critical and c.kind == ClaimKind.USER_ATTESTED and not c.user_confirmed
            for c in decision.claims):
         raise GoNotAllowed("user-attested fact without explicit confirmation")
+    calcs = _calcs(decision.claims, ev)
+    if any(r.status != "OK" or r.check_passed is False for r in calcs):
+        raise GoNotAllowed("a CALC claim is invalid, disputed or fails its check")
+    if _amount_based(decision.claims) and not any(r.check_passed for r in calcs):
+        raise GoNotAllowed("GO depends on an amount but has no passing CALC")

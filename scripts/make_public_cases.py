@@ -15,7 +15,7 @@ MAX_QUOTE = 200
 CLAIM_KEYS = ("role", "snapshot", "url", "http", "fetched_at", "norm_sha256",
               "match_hits", "match_layers", "snippet_sha256")
 CASE_KEYS = ("id", "domain", "input", "gold", "gold_detail", "trap",
-             "naive_false_go_trap", "user_attested", "inferences")
+             "naive_false_go_trap", "user_attested", "inferences", "calc")
 
 # Gold / coding changes made in this repo, each one logged in EVAL_CHANGELOG.md.
 # Applied on top of the private source file so the change stays auditable.
@@ -29,6 +29,25 @@ OVERRIDES = {
         "claim_roles": {0: "CONTEXT"},
         "inferences": [{"text": "The OAH promotional licence conflicts with the PayPal 'solely owned' rule "
                                 "if the same core is submitted to both events.", "derived_from": [0, 1]}],
+    },
+    # CALC coding (EVAL_CHANGELOG #E9). "source": claim index, or "user" = the
+    # request text as a USER_ATTESTED claim.
+    "T16": {
+        "calc": {"inputs": {"rate": {"literal": "10%", "source": 0}, "minfee": {"literal": "$5.00", "source": 0},
+                            "price": {"literal": "30", "source": "user"}, "cost": {"literal": "26", "source": "user"}},
+                 "steps": [["fee", "max(rate * price, minfee)"], ["net", "price - fee"]],
+                 "claimed": {"net": "25"}, "check": ["net", ">=", "cost"], "on_fail": "NOT_WORTH"},
+    },
+    "T21": {  # EVAL_CHANGELOG #E10
+        "calc": {"inputs": {"rate": {"literal": "20%", "source": 0},
+                            "price": {"literal": "200", "source": "user"}, "need": {"literal": "170", "source": "user"}},
+                 "steps": [["fee", "rate * price"], ["net", "price - fee"]],
+                 "claimed": {"net": "160"}, "check": ["net", ">=", "need"], "on_fail": "NOT_WORTH"},
+    },
+    "T30": {  # EVAL_CHANGELOG #E11 (same coding error as T06)
+        "claim_roles": {1: "CONTEXT"},
+        "inferences": [{"text": "70 000 EUR exceeds the HUF 20 million threshold at any exchange rate above "
+                                "286 HUF/EUR.", "derived_from": [1]}],
     },
 }
 
@@ -57,7 +76,7 @@ def main(src: str, dst: str) -> None:
             out["split"] = "holdout" if case["id"].startswith("R") else "dev"
             out["claims"] = [public_claim(c) for c in case.get("claims") or []]
             ov = OVERRIDES.get(case["id"], {})
-            for k in ("gold", "gold_detail", "inferences"):
+            for k in ("gold", "gold_detail", "inferences", "calc"):
                 if k in ov:
                     out[k] = ov[k]
             for i, role in ov.get("claim_roles", {}).items():
