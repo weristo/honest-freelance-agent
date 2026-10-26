@@ -66,18 +66,20 @@ class PayPalError(Exception):
 
 @dataclass
 class InvoiceStatus:
+    """The invoice status exactly as PayPal reports it (DRAFT, SENT, UNPAID,
+    PAID, MARKED_AS_PAID, PAID_EXTERNAL, PARTIALLY_PAID, ...). Nothing is merged:
+    MARKED_AS_PAID (the invoicer recorded a payment) is NOT shown as PAID (the
+    payer paid)."""
     invoice_id: str
     raw_status: str
 
     @property
-    def simple(self) -> str:
-        if self.raw_status in ("PAID", "MARKED_AS_PAID"):
-            return "PAID"
-        if self.raw_status == "DRAFT":
-            return "DRAFT"
-        if self.raw_status in ("CANCELLED", "REFUNDED", "MARKED_AS_REFUNDED"):
-            return "CLOSED"
-        return "UNPAID"   # SENT, UNPAID, PARTIALLY_PAID, PAYMENT_PENDING, SCHEDULED
+    def display(self) -> str:
+        return self.raw_status
+
+    @property
+    def paid_by_payer(self) -> bool:
+        return self.raw_status == "PAID"
 
 
 class SandboxClient:
@@ -88,6 +90,7 @@ class SandboxClient:
         self._client_secret = client_secret
         self._transport = transport
         self._token: Optional[str] = None
+        self.last_status: Optional[int] = None    # HTTP status of the last call (for reports)
 
     def __repr__(self) -> str:
         return f"SandboxClient(base_url={self.base_url!r}, credentials=[hidden])"
@@ -121,6 +124,7 @@ class SandboxClient:
             data = json.dumps(body).encode()
         headers.update(extra_headers or {})
         status, raw = self._transport(method, url, headers, data)
+        self.last_status = status
         try:
             parsed = json.loads(raw) if raw else {}
         except ValueError:
@@ -163,7 +167,24 @@ class SandboxClient:
         _, data = self._request("GET", f"/v2/invoicing/invoices/{_safe_id(invoice_id)}")
         return InvoiceStatus(invoice_id, str(data.get("status", "UNKNOWN")))
 
+    def record_payment(self, invoice_id: str, method: str = "BANK_TRANSFER",
+                       payment_date: Optional[str] = None, note: str = "") -> dict:
+        """Invoicer records a payment received outside PayPal (sandbox).
+        This is NOT a payer payment; PayPal reports the result status itself."""
+        if method not in ("BANK_TRANSFER", "CASH", "CHECK", "CREDIT_CARD", "DEBIT_CARD",
+                          "PAYPAL", "WIRE_TRANSFER", "OTHER"):
+            raise ValueError("invalid payment method")
+        body = {"method": method}
+        if payment_date:
+            body["payment_date"] = payment_date
+        if note:
+            body["note"] = note
+        _, data = self._request("POST", f"/v2/invoicing/invoices/{_safe_id(invoice_id)}/payments", body=body)
+        return data
+
     def remind(self, invoice_id: str, subject: str, note: str) -> None:
+        """Sends a reminder immediately. The CLI only calls this after an
+        explicit `hfa remind --approve <id>` on a saved draft."""
         self._request("POST", f"/v2/invoicing/invoices/{_safe_id(invoice_id)}/remind",
                       body={"subject": subject, "note": note,
                             "send_to_invoicer": False, "send_to_recipient": True})
@@ -175,19 +196,23 @@ def _safe_id(invoice_id: str) -> str:
     return invoice_id
 
 
-def build_invoice(*, invoicer_email: str, recipient_email: str, currency: str,
-                  item_name: str, amount: str, note: str = "", invoice_number: Optional[str] = None) -> dict:
-    """Minimal Invoicing v2 payload (sandbox personas only)."""
+def build_invoice(*, recipient_email: str, currency: str, item_name: str, amount: str,
+                  invoicer_email: Optional[str] = None, note: str = "",
+                  invoice_number: Optional[str] = None) -> dict:
+    """Minimal Invoicing v2 payload (sandbox personas only). Without
+    invoicer_email PayPal uses the account of the API caller."""
     detail = {"currency_code": currency, "note": note}
     if invoice_number:
         detail["invoice_number"] = invoice_number
-    return {
+    inv = {
         "detail": detail,
-        "invoicer": {"email_address": invoicer_email},
         "primary_recipients": [{"billing_info": {"email_address": recipient_email}}],
         "items": [{"name": item_name, "quantity": "1",
                    "unit_amount": {"currency_code": currency, "value": amount}}],
     }
+    if invoicer_email:
+        inv["invoicer"] = {"email_address": invoicer_email}
+    return inv
 
 
 def invoice_for_decision(decision: Decision, client: SandboxClient, invoice: dict) -> str:

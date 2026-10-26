@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 
-PROMPT_VERSION = "p2"
+PROMPT_VERSION = "p3"
 
 SYSTEM_PROMPT = """You are the proposer in an honest freelance agent.
 You read a freelance opportunity (or a quote / invoice step) and the platform
@@ -80,12 +80,26 @@ Sources the user provided (URL list; their text may follow):
 Respond with the JSON object only."""
 
 
-def render_user(request: str, sources: list[str]) -> str:
+SOURCE_BLOCK = """
+Text of {url} as fetched (first {limit} characters; quote only from it,
+verbatim):
+<<<
+{text}
+>>>
+"""
+SOURCE_TEXT_LIMIT = 12000
+
+
+def render_user(request: str, sources: list[str], texts: dict[str, str] | None = None) -> str:
     src = "\n".join(f"- {u}" for u in sources) or "- (none)"
-    return USER_TEMPLATE.format(request=request, sources=src)
+    out = USER_TEMPLATE.format(request=request, sources=src)
+    for u, t in (texts or {}).items():
+        out += SOURCE_BLOCK.format(url=u, limit=SOURCE_TEXT_LIMIT, text=t[:SOURCE_TEXT_LIMIT])
+    return out
 
 
 def prompt_sha256() -> str:
-    blob = json.dumps([PROMPT_VERSION, SYSTEM_PROMPT, USER_TEMPLATE, OUTPUT_SCHEMA],
+    blob = json.dumps([PROMPT_VERSION, SYSTEM_PROMPT, USER_TEMPLATE, SOURCE_BLOCK, SOURCE_TEXT_LIMIT,
+                       OUTPUT_SCHEMA],
                       sort_keys=True, ensure_ascii=False)
     return hashlib.sha256(blob.encode("utf-8")).hexdigest()

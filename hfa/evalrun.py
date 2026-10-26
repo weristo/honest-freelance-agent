@@ -32,7 +32,9 @@ from .pipeline import decide_from_proposal
 from .proposer.base import Proposer
 from .proposer.prompt import prompt_sha256
 from . import holdout as holdout_mod
-from .proposer.providers import MockClient
+from .normalize import norm
+from .proposer.budget import Budget
+from .proposer.providers import MockClient, client_from_env
 
 MOCK_BANNER = "MOCK - pipeline test, not a model measurement"
 
@@ -225,30 +227,69 @@ def main(argv: Optional[list[str]] = None) -> int:
     if a.freeze:
         print(json.dumps(holdout_mod.freeze(a.freeze), indent=1))
         return 0
+    if a.mock:
+        client = None
+    else:
+        client = client_from_env()
+        if client.provider == "unavailable":
+            print(f"llm: unavailable - {client.reason}. Nothing was sent to any model. "
+                  "(Use --mock for the labelled pipeline test.)", file=sys.stderr)
+            return 3
     if a.holdout:
         cases = holdout_mod.load_holdout(a.holdout)
-        # This round has only the mock proposer, so authorize_run refuses here.
-        holdout_mod.authorize_run("mock", a.frozen_prompt_sha)
+        # Never mock; needs both freezes with matching hashes; only once.
+        holdout_mod.authorize_run("mock" if a.mock else client.label, a.frozen_prompt_sha)
     else:
         cases = dev_cases(load_cases(a.cases))
-    if not a.mock:
-        print("llm: unavailable - real-model eval runs are not enabled in this build; "
-              "pass --mock for the labelled pipeline test", file=sys.stderr)
-        return 2
     if not a.live and not os.path.isdir(a.snapshots):
         print(f"snapshot dir {a.snapshots!r} not found; use --live to fetch sources fresh", file=sys.stderr)
         return 2
-    # This round: mock proposer only (no real LLM calls from the eval yet).
-    rows = []
+
+    rows: list[dict] = []
+    budget = None if a.mock else Budget()
+    usage_log = None if a.mock else os.path.join(a.out, "real", "usage.jsonl")
+    complete = True
     for case in cases:
-        client = MockClient(lambda s, u, c=case: json.dumps(naive_proposal(c)))
         fetcher = LiveFetcher() if a.live else FixtureFetcher(_snapshot_map(case, a.snapshots))
-        rows.append(run_case(case, Proposer(client), fetcher))
+        if a.mock:
+            proposer = Proposer(MockClient(lambda s, u, c=case: json.dumps(naive_proposal(c))),
+                                user_confirm=case_user_tick(case))
+        else:
+            proposer = Proposer(client, budget, usage_log=usage_log, user_confirm=case_user_tick(case),
+                                source_text=_text_of(fetcher))
+        row = run_case(case, proposer, fetcher)
+        if not a.mock:
+            row["usage"] = proposer.last_usage
+            proposer.last_usage = None
+        rows.append(row)
+        if row["status"] == "budget_exhausted":
+            complete = False
+            print(f"budget_exhausted at {case['id']}: stopping; no further model calls", file=sys.stderr)
+            break
     summary = aggregate(rows)
+    summary["complete"] = complete and len(rows) == len(cases)
+    summary["split"] = "holdout" if a.holdout else "dev"
     path = write_results(rows, summary, a.out, real=not summary["is_mock"])
+    if a.holdout and not a.mock:
+        holdout_mod.record_run(summary)
     print(format_table(rows, summary))
+    if not summary["complete"]:
+        print("INCOMPLETE RUN - do not report these numbers as a full eval")
     print(f"written: {path}")
     return 0
+
+
+def case_user_tick(case: dict) -> bool:
+    """The case text is the user's own input, so its stated facts count as the
+    user's tick. The model's output never sets it (Claim.from_dict resets it)."""
+    return bool(case.get("user_attested") or case.get("calc"))
+
+
+def _text_of(fetcher):
+    def get(url: str) -> str:
+        doc = fetcher.fetch(url)
+        return norm(doc.visible + " " + doc.embedded)
+    return get
 
 
 if __name__ == "__main__":

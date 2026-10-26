@@ -228,7 +228,7 @@ freeze has two final steps, issued by the eval owner: `python3.11 -m hfa eval
 proposer prompt). Each step only writes a file (`data/eval/FREEZE_GATE.json`
 or `data/eval/FREEZE_PROMPT.json`, created once, never overwritten); it
 makes no git commit. The holdout runs only when both exist and still match,
-never with the mock, and only once. Not frozen yet. Every gold or coding change before the freeze is logged in
+never with the mock, and only once. Status: gate frozen at 3d30ac0; the prompt is not frozen yet. Every gold or coding change before the freeze is logged in
 [EVAL_CHANGELOG.md](EVAL_CHANGELOG.md), including whether it was made after
 seeing mock results.
 

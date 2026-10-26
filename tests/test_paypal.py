@@ -32,6 +32,9 @@ class FakePayPal:
         if path.endswith("/send"):
             self.status = "UNPAID"
             return 202, b""
+        if path.endswith("/payments") and method == "POST":
+            self.status = "MARKED_AS_PAID"
+            return 200, b'{"payment_id": "EXTR-TEST"}'
         if path.endswith("/remind"):
             return 204, b""
         if method == "GET":
@@ -95,9 +98,9 @@ class InvoicingFlowTests(unittest.TestCase):
         inv_id = invoice_for_decision(go_decision(), self.c, self.inv)
         self.assertEqual(inv_id, "INV2-TEST-0001")
         st = self.c.status(inv_id)
-        self.assertEqual(st.simple, "UNPAID")
+        self.assertEqual(st.display, "UNPAID")
         self.t.status = "PAID"
-        self.assertEqual(self.c.status(inv_id).simple, "PAID")
+        self.assertEqual(self.c.status(inv_id).display, "PAID")
         self.c.remind(inv_id, "Reminder", "Friendly reminder")
         methods = [(m, u.split("/v")[1]) for m, u, _, _ in self.t.calls]
         self.assertEqual(methods[0], ("POST", "1/oauth2/token"))

@@ -82,7 +82,12 @@ class Claim:
 
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> "Claim":
+        """Parse a claim proposed by a model. `user_confirmed` is ALWAYS reset
+        to False here, whatever the model sent: the tick on a USER_ATTESTED
+        claim can only come from the user's own input (CLI flag / UI field),
+        applied afterwards by the caller."""
         d = dict(d)
+        d["user_confirmed"] = False
         d["kind"] = ClaimKind(d.get("kind", "FACT"))
         d["polarity"] = Polarity(d.get("polarity", "SUPPORTS"))
         known = {f for f in cls.__dataclass_fields__}

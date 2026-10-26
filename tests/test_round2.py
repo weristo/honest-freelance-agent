@@ -155,7 +155,7 @@ class HoldoutTests(unittest.TestCase):
 
     def test_cli_holdout_with_mock_is_refused(self):
         with self.assertRaises(holdout.HoldoutLocked):
-            evalrun.main(["--holdout", os.path.join(HERE, "data", "eval", "holdout_public.jsonl")])
+            evalrun.main(["--holdout", os.path.join(HERE, "data", "eval", "holdout_public.jsonl"), "--mock"])
 
 
 class GoldChangeTests(unittest.TestCase):

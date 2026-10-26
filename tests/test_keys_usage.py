@@ -101,7 +101,7 @@ class KeyFileTests(unittest.TestCase):
             self.assertEqual(os.environ.get("PAYPAL_BASE_URL"), "https://api-m.sandbox.paypal.com")
 
     def test_eval_without_mock_switch_is_unavailable(self):
-        self.assertEqual(evalrun.main(["--cases", os.path.join(self.cwd, "data", "eval", "cases_public.jsonl")]), 2)
+        self.assertEqual(evalrun.main(["--cases", os.path.join(self.cwd, "data", "eval", "cases_public.jsonl")]), 3)
 
 
 class UsageTests(unittest.TestCase):

@@ -5,11 +5,11 @@ freeze** is listed here: what changed, why, when, and whether it was made
 after looking at mock-run results. Changes made after seeing results are a
 form of tuning on the dev set; the holdout set (`data/eval/holdout_public.jsonl`,
 pinned SHA-256, run once after the freeze, never with the mock) is the
-counterweight. Status: **not frozen yet**. The freeze has two steps and is
-issued by the eval owner (002), not by the coding agent: `python -m hfa eval
---freeze gate` (decision code; target 2026-10-27 evening) and `python -m hfa
-eval --freeze prompt` (proposer prompt; by 2026-10-30 at the latest). Neither
-has been run.
+counterweight. Status: **gate frozen at 3d30ac0** (`data/eval/FREEZE_GATE.json`,
+issued by the eval owner 002); the prompt is not frozen yet (`python -m hfa
+eval --freeze prompt`, by 2026-10-30 at the latest). The frozen decision code
+(normalize, extract, fetcher, verifier, registry, calc, dates, gate,
+pipeline) is not touched after the freeze; a test checks its hash.
 
 Holdout file hashes (SHA-256): private full file
 `0b7ae93043edd4693926f8af99b9819d36d6755e5e7b8cf385719fb577394994` (outside
@@ -47,6 +47,9 @@ every case flagged as a false-GO trap). They test the wiring, not a model.
 | E20 | 2026-10-26 | code (gate helper `calc.has_number`) | For G6, a four-digit number between 1900 and 2100 in a USER_ATTESTED claim counts as a value only if a currency sign, currency code or % stands directly next to it; otherwise it is read as a year. "2026-os bevételem 6 M Ft" still triggers G6 (because of "6 M Ft"); "2026-os" alone does not. | Coordinator decision (002). | No new tuning: mock results unchanged (0/35 false GO, 5/24 deferral, 33/40 exact). |
 | E21 | 2026-10-26 | decision (no code change) | The guard-word deferrals of T01 and T04 (gold GO) stay. They are reported as part of the deferral rate; no further tuning before the freeze. | Coordinator decision (002). | Yes (they were visible in every mock run since round 2). |
 | E22 | 2026-10-26 | code (LLM client / proposer / CLI only; after the gate freeze, frozen modules untouched) | The LLM key comes only from one key file (`HFA_ENV_FILE`, or `./.env`); shell environment keys are never used and the key is never exported to the environment. No key -> explicit `llm: unavailable` in the result, the CLI card, the trace and the usage log; the mock runs only with an explicit `--mock` switch (`hfa demo --mock`, `hfa eval --mock`). Each real call logs model, input/output tokens and an estimated USD cost (Anthropic list price; labelled estimate; tokens only if unpriced), no key identifier; the daily/total caps use the same usage. | Coordinator decision (002). | No (no eval logic or gold changed; mock results unchanged). |
+| E23 | 2026-10-26 | code (models.py / proposer; not a frozen module) | `Claim.from_dict` always resets `user_confirmed` to False at parse time, whatever the model sends. The USER_ATTESTED tick comes only from the user's input: CLI `--user-confirm`, the UI, or - in the eval - the case text itself (the case is the user's input). Gate hash unchanged (test `test_gate_hash_unchanged`). | Coordinator decision (002), from the fact check: a model could tick its own USER_ATTESTED claim. | No (mock results unchanged: the eval applies the case's user tick explicitly). |
+| E24 | 2026-10-26 | code (PayPal client) | The invoice status is shown exactly as PayPal reports it (`MARKED_AS_PAID`, `PAID_EXTERNAL`, ... are not merged into PAID); `record_payment()` added (invoicer-recorded payment, sandbox). | Coordinator decision (002). | No. |
+| E25 | 2026-10-26 | code (eval runner) + **prompt p2 -> p3** | Real-model eval branch: without `--mock` the eval uses the key-file client (no key -> "llm: unavailable", exit 3), the cost caps, a usage log, and stops at `budget_exhausted` (run marked INCOMPLETE). The holdout accepts a real model only with both freezes, matching hashes, once; never the mock. The proposer now receives the fetched source text (first 12 000 characters per source) so that it can quote verbatim; this changes the prompt (p3). The verifier still fetches and checks every quote independently. | Coordinator decision (002); source text added by the coding agent because a model that sees only URLs can only quote from memory (that would be the "closed book" condition, not the planned one). | No real-model results exist yet. |
 
 ## Mock results by stage (dev set, 40 cases, MOCK - not a model measurement)
 

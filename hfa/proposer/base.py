@@ -9,7 +9,7 @@ import json
 import os
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Optional, Protocol
+from typing import Callable, Optional, Protocol
 
 from ..models import Claim, KillClass, Verdict
 from .budget import PRICE_SOURCE, Budget, BudgetExhausted, UnknownPrice, cost_usd, estimate_tokens
@@ -97,11 +97,19 @@ def usage_record(model: str, input_tokens: int, output_tokens: int, llm: str) ->
 
 class Proposer:
     def __init__(self, client: LLMClient, budget: Optional[Budget] = None, max_tokens: int = 2000,
-                 usage_log: Optional[str] = None):
+                 usage_log: Optional[str] = None, user_confirm: bool = False,
+                 source_text: Optional[Callable[[str], str]] = None):
+        """user_confirm: the USER's own tick (CLI --user-confirm / UI field) for
+        the USER_ATTESTED claims of this run; never taken from the model.
+        source_text: optional url -> text provider; the text is given to the
+        model as context so it can quote verbatim (the verifier still fetches
+        and checks every quote independently)."""
         self.client = client
         self.budget = budget
         self.max_tokens = max_tokens
         self.usage_log = usage_log
+        self.user_confirm = user_confirm
+        self.source_text = source_text
         self.last_usage: Optional[dict] = None
 
     def _log(self, rec: dict) -> None:
@@ -113,7 +121,14 @@ class Proposer:
             f.write(json.dumps(rec, ensure_ascii=False) + "\n")
 
     def propose(self, request: str, sources: list[str]) -> ProposerResult:
-        user = render_user(request, sources)
+        texts = {}
+        if self.source_text is not None and self.client.provider not in ("mock", "unavailable"):
+            for u in sources:
+                try:
+                    texts[u] = self.source_text(u) or ""
+                except Exception as e:          # context is optional; the verifier decides
+                    texts[u] = f"(could not fetch: {type(e).__name__})"
+        user = render_user(request, sources, texts)
         label = self.client.label
         ph = prompt_sha256()
         if self.client.provider == "unavailable":
@@ -145,4 +160,7 @@ class Proposer:
             verdict, kill, why, claims = parse_proposal(resp.text)
         except ProposalInvalid as e:
             return ProposerResult("error", label, ph, message=f"invalid proposal: {e}", cost_usd=cost, usage=usage)
+        for c in claims:                      # the tick comes from the user, not the model
+            if c.kind.value == "USER_ATTESTED":
+                c.user_confirmed = bool(self.user_confirm)
         return ProposerResult("ok", label, ph, verdict, kill, why, claims, cost_usd=cost, usage=usage)
