@@ -112,7 +112,7 @@ Nothing else is needed for the core (standard library only).
 
 ```bash
 git clone <this repo> && cd honest-freelance-agent
-python3.11 -m unittest discover -s tests -t .      # 155 tests, offline, no keys (1 skipped without the private snapshots)
+python3.11 -m unittest discover -s tests -t .      # 160 tests, offline, no keys (1 skipped without the private snapshots)
 ```
 
 ## Run
@@ -141,6 +141,16 @@ python3.11 -m hfa demo --invoice
 # or, with the key file elsewhere:
 HFA_ENV_FILE=~/my-keys/hfa.env python3.11 -m hfa demo --invoice
 ```
+
+**What the model sees vs. what is checked.** The model gets each source's
+fetched text, cut to the first 12 000 characters (the cut is logged per
+source: original length, passed length, truncated or not). The verifier
+never uses that text: it compares every quote with its **own** fresh fetch.
+A quote the model takes from the part that was cut off is marked in the
+proposer layer, its quote field is emptied, and it ends UNVERIFIED (the
+frozen verifier reports this as `QUOTE_TOO_SHORT`, the closest existing
+reason code; the claim text carries the mark "quote outside the text given
+to the model").
 
 The LLM key is read **only** from that file. A key that happens to be set in
 your shell (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, ...) is never used, and

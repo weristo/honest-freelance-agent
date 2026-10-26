@@ -260,6 +260,8 @@ def main(argv: Optional[list[str]] = None) -> int:
         row = run_case(case, proposer, fetcher)
         if not a.mock:
             row["usage"] = proposer.last_usage
+            row["source_context"] = proposer.last_context
+            row["quotes_outside_context"] = proposer.last_outside
             proposer.last_usage = None
         rows.append(row)
         if row["status"] == "budget_exhausted":

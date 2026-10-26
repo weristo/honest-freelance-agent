@@ -259,6 +259,8 @@ def run_real(invoice: bool, request: Optional[str] = None, sources: Optional[lis
     if res.status == "unavailable":
         c["banner"] = "llm: unavailable - no key file / no key; nothing was sent to any model"
     c["usage"] = getattr(proposer, "last_usage", None)
+    c["source_context"] = proposer.last_context
+    c["quotes_outside_context"] = proposer.last_outside
     if invoice:
         if not res.decision or res.decision.final.value != "GO":
             c["invoice"] = "not created: the gate did not say GO"

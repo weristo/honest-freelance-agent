@@ -13,7 +13,10 @@ from typing import Callable, Optional, Protocol
 
 from ..models import Claim, KillClass, Verdict
 from .budget import PRICE_SOURCE, Budget, BudgetExhausted, UnknownPrice, cost_usd, estimate_tokens
-from .prompt import SYSTEM_PROMPT, prompt_sha256, render_user
+from ..normalize import norm
+from .prompt import SOURCE_TEXT_LIMIT, SYSTEM_PROMPT, prompt_sha256, render_user
+
+OUTSIDE_CONTEXT_MARK = "[quote outside the text given to the model] "
 
 
 @dataclass
@@ -45,6 +48,8 @@ class ProposerResult:
     message: str = ""
     cost_usd: float = 0.0
     usage: Optional[dict] = None        # tokens + estimated USD; never a key or key id
+    context: list[dict] = field(default_factory=list)       # per source: lengths, truncated?
+    outside_context: list[str] = field(default_factory=list)  # claim ids quoted from cut-off text
 
 
 class ProposalInvalid(ValueError):
@@ -95,6 +100,31 @@ def usage_record(model: str, input_tokens: int, output_tokens: int, llm: str) ->
     return rec
 
 
+def mark_outside_context(claims, texts: dict[str, str]) -> list[str]:
+    """A FACT quote that is NOT in the text passed to the model but IS in the
+    part that was cut off can only come from somewhere other than the given
+    context (memory, a guess). Such a claim is marked here, in the proposer
+    layer: the quote is moved into the claim text with a visible mark and the
+    quote field is emptied, so the frozen verifier returns UNVERIFIED
+    (reason QUOTE_TOO_SHORT, the only existing reason that applies) and the
+    gate cannot GO on it. Quotes found in neither part are left alone: the
+    verifier reports them as NO_MATCH."""
+    flagged = []
+    for c in claims:
+        full = texts.get(c.source_url)
+        if c.kind.value != "FACT" or not full or not c.quote:
+            continue
+        q = norm(c.quote).casefold()
+        passed = norm(full[:SOURCE_TEXT_LIMIT]).casefold()
+        if q in passed:
+            continue
+        if q in norm(full).casefold():
+            c.text = OUTSIDE_CONTEXT_MARK + c.quote
+            c.quote = ""
+            flagged.append(c.claim_id)
+    return flagged
+
+
 class Proposer:
     def __init__(self, client: LLMClient, budget: Optional[Budget] = None, max_tokens: int = 2000,
                  usage_log: Optional[str] = None, user_confirm: bool = False,
@@ -111,6 +141,8 @@ class Proposer:
         self.user_confirm = user_confirm
         self.source_text = source_text
         self.last_usage: Optional[dict] = None
+        self.last_context: list[dict] = []
+        self.last_outside: list[str] = []
 
     def _log(self, rec: dict) -> None:
         if not self.usage_log:
@@ -131,6 +163,12 @@ class Proposer:
         user = render_user(request, sources, texts)
         label = self.client.label
         ph = prompt_sha256()
+        context = [{"source_url": u, "original_chars": len(t), "passed_chars": min(len(t), SOURCE_TEXT_LIMIT),
+                    "truncated": len(t) > SOURCE_TEXT_LIMIT} for u, t in texts.items()]
+        self.last_context, self.last_outside = context, []
+        if context:
+            self._log({"llm": label, "event": "source_context", "limit_chars": SOURCE_TEXT_LIMIT,
+                       "sources": context})
         if self.client.provider == "unavailable":
             msg = f"llm: unavailable - {getattr(self.client, 'reason', '')}"
             self._log({"llm": "unavailable", "status": "unavailable", "message": msg})
@@ -163,4 +201,10 @@ class Proposer:
         for c in claims:                      # the tick comes from the user, not the model
             if c.kind.value == "USER_ATTESTED":
                 c.user_confirmed = bool(self.user_confirm)
-        return ProposerResult("ok", label, ph, verdict, kill, why, claims, cost_usd=cost, usage=usage)
+        outside = mark_outside_context(claims, texts)
+        self.last_outside = outside
+        if outside:
+            self._log({"llm": label, "event": "quote_outside_context", "claims": outside,
+                       "effect": "quote removed before verification -> UNVERIFIED (QUOTE_TOO_SHORT)"})
+        return ProposerResult("ok", label, ph, verdict, kill, why, claims, cost_usd=cost, usage=usage,
+                              context=context, outside_context=outside)
