@@ -13,7 +13,7 @@ Status: early build (hackathon), local runs only (no hosted demo). The
 verifier, gate, budget guard, PayPal sandbox client and mini-eval run and
 are tested. The real-LLM path is implemented and wired, but no model has
 been measured yet: every number in this README comes from the **mock**
-proposer. The UI is not built yet; the demo prints decision cards as JSON.
+proposer. A minimal local UI (`hfa ui`, 127.0.0.1 only) shows the decision cards.
 
 ## Why
 
@@ -112,7 +112,7 @@ Nothing else is needed for the core (standard library only).
 
 ```bash
 git clone <this repo> && cd honest-freelance-agent
-python3.11 -m unittest discover -s tests -t .      # 136 tests, offline, no keys (1 skipped without the private snapshots)
+python3.11 -m unittest discover -s tests -t .      # 155 tests, offline, no keys (1 skipped without the private snapshots)
 ```
 
 ## Run
@@ -153,6 +153,39 @@ example request is allowed under the hackathon rules, fetches the rules page
 live, verifies every quote, runs the gate, and only on GO creates a sandbox
 invoice (draft -> send -> status). Without `--invoice` it stops after the
 decision. The trace goes to `data/traces/demo.jsonl` (redacted).
+
+**Your own job, as live input.** "Is it worth it?" with your numbers:
+
+```bash
+python3.11 -m hfa demo --mock --price 30 --cost 29 --user-confirm   # fictional platform, llm: mock
+python3.11 -m hfa demo --price 30 --cost 26 --platform freelancer --user-confirm   # real model
+```
+
+`--user-confirm` is **your** tick on the numbers you typed (G5). The model can
+never set it: any `user_confirmed` in the model's output is discarded when it
+is parsed. Without the tick the result is NEEDS_HUMAN.
+
+**Local UI.** The same cards in a browser, served only on `127.0.0.1`
+(standard library, no external scripts or styles, nothing hosted):
+
+```bash
+python3.11 -m hfa ui --mock            # big MOCK banner
+python3.11 -m hfa ui --price 30 --cost 26 --platform freelancer --user-confirm
+# then open http://127.0.0.1:8765/
+```
+
+Each card shows the quoted text, the source URL, the source SHA-256 and
+fetch time, the verifier state and reason, the `llm: ...` label, and the
+raw PayPal invoice status.
+
+**Reminders need your approval.** `python3.11 -m hfa remind <invoice-id>`
+only saves a draft (`data/reminders/`); nothing is sent until you run
+`python3.11 -m hfa remind --approve <invoice-id>`. (PayPal also limits
+reminders per day.)
+
+The invoice status is always PayPal's raw value: `MARKED_AS_PAID` (the
+invoicer recorded a payment) is shown as such, never as `PAID` (the payer
+paid).
 
 Other commands:
 
