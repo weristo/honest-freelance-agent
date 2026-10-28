@@ -71,6 +71,7 @@ class ProposerResult:
     context: list[dict] = field(default_factory=list)       # per source: lengths, truncated?
     outside_context: list[str] = field(default_factory=list)  # claim ids quoted from cut-off text
     user_unticked: dict = field(default_factory=dict)  # claim id -> reason the user's tick was withheld
+    raw_text: Optional[str] = None      # the model's raw answer text (E33: eval row / trace only)
 
 
 class ProposalInvalid(ValueError):
@@ -169,6 +170,31 @@ def apply_user_tick(claims, user_confirm: bool, user_input: str) -> dict:
     return unticked
 
 
+def claims_record(claims) -> list[dict]:
+    """The parsed claims as handed to the verifier (after the user tick and the
+    outside-context mark), for the eval row / trace (E33). Logging only."""
+    return [{"claim_id": c.claim_id, "kind": c.kind.value, "critical": c.critical,
+             "polarity": c.polarity.value, "quote": c.quote, "source_url": c.source_url,
+             "derived_from": list(c.derived_from or []), "calc": c.calc} for c in claims]
+
+
+def proposal_from_text(text: str, label: str, user_confirm: bool, user_input: str,
+                       texts: dict[str, str]) -> ProposerResult:
+    """The deterministic, model-free part of a proposal: parse the raw answer,
+    set the user's tick, mark quotes from cut-off text. Used by
+    Proposer.propose and by `hfa eval --replay` (E33), so both run the same
+    code. Never creates or calls an LLM client."""
+    ph = prompt_sha256()
+    try:
+        verdict, kill, why, claims = parse_proposal(text)
+    except ProposalInvalid as e:
+        return ProposerResult("error", label, ph, message=f"invalid proposal: {e}", raw_text=text)
+    unticked = apply_user_tick(claims, user_confirm, user_input)
+    outside = mark_outside_context(claims, texts)
+    return ProposerResult("ok", label, ph, verdict, kill, why, claims,
+                          outside_context=outside, user_unticked=unticked, raw_text=text)
+
+
 class Proposer:
     def __init__(self, client: LLMClient, budget: Optional[Budget] = None, max_tokens: int = 2000,
                  usage_log: Optional[str] = None, user_confirm: bool = False,
@@ -195,6 +221,7 @@ class Proposer:
         self.last_usage: Optional[dict] = None
         self.last_context: list[dict] = []
         self.last_outside: list[str] = []
+        self.last_raw: Optional[str] = None
 
     def _log(self, rec: dict) -> None:
         if not self.usage_log:
@@ -225,6 +252,7 @@ class Proposer:
                 entry["thin"] = note
             context.append(entry)
         self.last_context, self.last_outside, self.last_user_unticked = context, [], {}
+        self.last_raw = None
         if context:
             self._log({"llm": label, "event": "source_context", "limit_chars": SOURCE_TEXT_LIMIT,
                        "sources": context})
@@ -257,21 +285,21 @@ class Proposer:
         if usage:
             self.last_usage = usage
             self._log(dict(usage, status="ok"))
-        try:
-            verdict, kill, why, claims = parse_proposal(resp.text)
-        except ProposalInvalid as e:
-            return ProposerResult("error", label, ph, message=f"invalid proposal: {e}", cost_usd=cost, usage=usage)
-        unticked = apply_user_tick(claims, self.user_confirm,
-                                   request if self.user_input is None else self.user_input)
+        self.last_raw = resp.text
+        res = proposal_from_text(resp.text, label, self.user_confirm,
+                                 request if self.user_input is None else self.user_input, texts)
+        res.cost_usd, res.usage = cost, usage
+        if res.status != "ok":
+            return res
+        unticked, outside = res.user_unticked, res.outside_context
         self.last_user_unticked = unticked
         if unticked:
             self._log({"llm": label, "event": "user_unticked", "claims": unticked,
                        "effect": "user tick withheld -> G5 -> no GO"})
-        outside = mark_outside_context(claims, texts)
         self.last_outside = outside
         if outside:
             self._log({"llm": label, "event": OUTSIDE_CONTEXT_CATEGORY, "claims": outside,
                        "reason": OUTSIDE_CONTEXT_REASON,
                        "effect": "quote removed before verification -> UNVERIFIED"})
-        return ProposerResult("ok", label, ph, verdict, kill, why, claims, cost_usd=cost, usage=usage,
-                              context=context, outside_context=outside, user_unticked=unticked)
+        res.context = context
+        return res

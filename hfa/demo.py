@@ -26,11 +26,11 @@ import os
 from decimal import Decimal, InvalidOperation
 from typing import Optional
 
-from .fetcher import LiveFetcher, SourceDoc, doc_from_bytes
+from .fetcher import LiveFetcher, SourceDoc, doc_from_bytes, utcnow_iso
 from .normalize import norm
 from .paypal.client import SandboxClient, build_invoice, invoice_for_decision
-from .pipeline import RunResult, run
-from .proposer.base import OUTSIDE_CONTEXT_MARK, Proposer, visible_reason
+from .pipeline import RunResult, run, write_trace
+from .proposer.base import OUTSIDE_CONTEXT_MARK, Proposer, claims_record, visible_reason
 from .proposer.budget import Budget
 from .proposer.keys import KEY_NAMES, key_file_path
 from .proposer.providers import MockClient, client_from_env
@@ -262,6 +262,17 @@ def _live_text(fetcher: LiveFetcher):
     return get
 
 
+def raw_trace_step(res: RunResult, proposer: Proposer) -> dict:
+    """E33: the model's raw answer, the parsed claims (as handed to the
+    verifier) and the kill class, as one extra trace line. Logging only;
+    the trace lives in data/traces/ (git-ignored)."""
+    d = res.decision
+    return {"t": utcnow_iso(), "actor": "proposer_raw", "llm": res.llm, "status": res.status,
+            "raw_model_output": proposer.last_raw,
+            "claims_parsed": claims_record(d.claims) if d else None,
+            "kill_class": d.kill_class.value if d and d.kill_class else None}
+
+
 def run_real(invoice: bool, request: Optional[str] = None, sources: Optional[list[str]] = None,
              user_confirm: bool = False, amount: Optional[str] = None) -> dict:
     load_dotenv(key_file_path())   # PayPal settings (the LLM key is read separately)
@@ -270,6 +281,7 @@ def run_real(invoice: bool, request: Optional[str] = None, sources: Optional[lis
     proposer = Proposer(client_from_env(), Budget(), usage_log=trace, user_confirm=user_confirm,
                         source_text=_live_text(fetcher))
     res = run(request or REAL_REQUEST, sources or REAL_SOURCES, proposer, fetcher, trace_path=trace)
+    write_trace(trace, [raw_trace_step(res, proposer)])
     c = card(res, proposer.last_user_unticked)
     c["request"] = request or REAL_REQUEST
     c["user_tick"] = "given (--user-confirm)" if user_confirm else "none"

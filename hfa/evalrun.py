@@ -29,7 +29,7 @@ from typing import Iterable, Optional
 from .fetcher import FixtureFetcher, LiveFetcher
 from .models import EvidenceState, KillClass, Verdict
 from .pipeline import decide_from_proposal
-from .proposer.base import Proposer, visible_reason
+from .proposer.base import Proposer, claims_record, proposal_from_text, visible_reason
 from .proposer.prompt import SOURCE_TEXT_LIMIT, SYSTEM_PROMPT, prompt_sha256, render_user
 from . import holdout as holdout_mod
 from .normalize import norm
@@ -38,6 +38,8 @@ from .proposer.providers import MockClient, client_from_env
 
 MOCK_BANNER = "MOCK - pipeline test, not a model measurement"
 DEFAULT_SNAPSHOTS = "data/private/snapshots"
+DEFAULT_CASES = "data/eval/cases_public.jsonl"
+PRE_E33 = "no raw model output stored in this run (pre-E33)"
 MAX_TOKENS = 2000           # the Proposer's default output cap, also used for the estimate
 
 
@@ -134,16 +136,31 @@ def to_label(final: Verdict, kill_class, evidence) -> str:
     return "NEEDS_HUMAN"
 
 
+def case_sources(case: dict) -> list[str]:
+    return sorted({c["url"] for c in case.get("claims") or []})
+
+
 def run_case(case: dict, proposer: Proposer, fetcher) -> dict:
-    pr = proposer.propose(case["input"], sorted({c["url"] for c in case.get("claims") or []}))
+    pr = proposer.propose(case["input"], case_sources(case))
+    return decide_row(case, pr, fetcher)
+
+
+def decide_row(case: dict, pr, fetcher) -> dict:
+    """One eval row from a proposer result: verifier + gate on the case's
+    fetcher. Shared by the live run and `--replay` (E33)."""
     row = {"id": case["id"], "llm": pr.llm, "gold": case["gold"], "status": pr.status}
+    # E33: the model's raw answer, stored for a model-free replay (data/eval/runs only, git-ignored)
+    row["raw_model_output"] = pr.raw_text
     if pr.status != "ok":
         row.update(no_verifier=None, verifier=None, message=pr.message)
         return row
     proposed = pr.decision
     row["no_verifier"] = to_label(proposed, pr.kill_class, [])
+    row["claims_parsed"] = claims_record(pr.claims)
+    row["proposed_kill_class"] = pr.kill_class.value if pr.kill_class else None
     res = decide_from_proposal(pr, fetcher, case["input"])
     d = res.decision
+    row["kill_class"] = d.kill_class.value if d.kill_class else None
     row["verifier"] = to_label(d.final, d.kill_class, d.evidence)
     claims = {c.claim_id: c for c in d.claims}
     shown = [(e, *visible_reason(claims.get(e.claim_id), e)) for e in d.evidence]
@@ -272,8 +289,9 @@ def format_table(rows: Iterable[dict], summary: dict) -> str:
 
 def main(argv: Optional[list[str]] = None) -> int:
     ap = argparse.ArgumentParser(prog="hfa eval")
-    ap.add_argument("--cases", default="data/eval/cases_public.jsonl")
-    ap.add_argument("--snapshots", default=DEFAULT_SNAPSHOTS,
+    ap.add_argument("--cases", default=None,
+                    help="cases file (default data/eval/cases_public.jsonl; with --replay: the one the run recorded)")
+    ap.add_argument("--snapshots", default=None,
                     help="directory of full-text source snapshots (not in the repo; the default "
                          f"{DEFAULT_SNAPSHOTS} does not exist in a fresh clone - pass the eval owner's "
                          "directory, e.g. --snapshots ~/ai-collab/002-cash/prep/eval_snapshots)")
@@ -285,8 +303,16 @@ def main(argv: Optional[list[str]] = None) -> int:
     ap.add_argument("--out", default="data/eval/runs")
     ap.add_argument("--mock", action="store_true",
                     help="run with the scripted mock proposer (labelled MOCK; not a measurement)")
+    ap.add_argument("--replay", metavar="RUN_JSON",
+                    help="model-free replay (E33): re-run the stored raw model answers of RUN_JSON through "
+                         "parse -> verifier -> gate on the same snapshots; exit 1 on any difference. "
+                         "No LLM client is created or called.")
     a = ap.parse_args(argv)
 
+    if a.replay:
+        return replay_main(a.replay, a.cases, a.snapshots)
+    a.cases = a.cases or DEFAULT_CASES
+    a.snapshots = a.snapshots or DEFAULT_SNAPSHOTS
     if a.freeze:
         print(json.dumps(holdout_mod.freeze(a.freeze), indent=1))
         return 0
@@ -340,6 +366,7 @@ def main(argv: Optional[list[str]] = None) -> int:
             raise
         summary["complete"] = complete and len(rows) == len(cases)
         summary["split"] = "holdout"
+        summary["replay_inputs"] = replay_inputs(a.holdout, True, a)
         try:
             path = write_results(rows, summary, a.out, real=True)
         finally:
@@ -349,11 +376,107 @@ def main(argv: Optional[list[str]] = None) -> int:
         summary = aggregate(rows)
         summary["complete"] = complete and len(rows) == len(cases)
         summary["split"] = "dev"
+        summary["replay_inputs"] = replay_inputs(a.cases, False, a)
         path = write_results(rows, summary, a.out, real=not summary["is_mock"])
     print(format_table(rows, summary))
     if not summary["complete"]:
         print("INCOMPLETE RUN - do not report these numbers as a full eval")
     print(f"written: {path}")
+    return 0
+
+
+def replay_inputs(cases_path: str, holdout: bool, a) -> dict:
+    """What `--replay` needs to rebuild the same inputs (E33). Paths only."""
+    return {"cases": os.path.abspath(cases_path), "holdout": holdout, "live": bool(a.live),
+            "snapshots": None if a.live else os.path.abspath(a.snapshots)}
+
+
+# --- model-free replay (E33) ---------------------------------------------------
+
+REPLAY_FIELDS = ("status", "no_verifier", "verifier", "proposed_kill_class", "kill_class",
+                 "claims_parsed", "reasons", "gate_log", "user_unticked", "quotes_outside_context")
+
+
+class ReplayError(ValueError):
+    pass
+
+
+def replay_rows(run: dict, cases_path: Optional[str] = None,
+                snapshots: Optional[str] = None) -> tuple[list[dict], list[str], list[str]]:
+    """Re-run the stored raw answers of a run through parse -> verifier ->
+    gate on the same snapshots. Returns (replayed rows, differences, notes).
+    Uses no Proposer and no LLM client: proposal_from_text() is the same
+    model-free code the live Proposer runs after the call."""
+    rows = run.get("rows") or []
+    if not any("raw_model_output" in r for r in rows):
+        raise ReplayError(PRE_E33)
+    inputs = (run.get("summary") or {}).get("replay_inputs") or {}
+    if inputs.get("live"):
+        raise ReplayError("this run fetched sources live; there is no snapshot to replay against")
+    cases_path = cases_path or inputs.get("cases")
+    snapshots = snapshots or inputs.get("snapshots")
+    if not cases_path or not snapshots:
+        raise ReplayError("the run does not record its cases file / snapshot dir; pass --cases and --snapshots")
+    if not os.path.isdir(snapshots):
+        raise ReplayError(f"snapshot dir {snapshots!r} not found")
+    cases = holdout_mod.load_holdout(cases_path) if inputs.get("holdout") else load_cases(cases_path)
+    by_id = {c["id"]: c for c in cases}
+    out, diffs, notes = [], [], []
+    for r in rows:
+        case = by_id.get(r["id"])
+        if case is None:
+            diffs.append(f"{r['id']}: case not in {cases_path}")
+            continue
+        if case["gold"] != r.get("gold"):
+            diffs.append(f"{r['id']}: gold {r.get('gold')!r} in the run, {case['gold']!r} in the cases file")
+        raw = r.get("raw_model_output")
+        if raw is None:
+            notes.append(f"{r['id']}: no raw output (status {r.get('status')}); not replayed")
+            continue
+        fetcher = FixtureFetcher(_snapshot_map(case, snapshots))
+        # The live run gave source text to a real model only (never to the mock).
+        texts = {} if r.get("llm") == "mock" else _replay_texts(fetcher, case_sources(case))
+        pr = proposal_from_text(raw, r["llm"], case_user_tick(case), case_user_input(case), texts)
+        new = decide_row(case, pr, fetcher)
+        if r.get("llm") != "mock":
+            new["quotes_outside_context"] = pr.outside_context
+        for k in REPLAY_FIELDS:
+            if k not in r and k not in new:
+                continue
+            if r.get(k) != new.get(k):
+                diffs.append(f"{r['id']}: {k}: stored {r.get(k)!r} != replay {new.get(k)!r}")
+        out.append(new)
+    return out, diffs, notes
+
+
+def _replay_texts(fetcher, sources: list[str]) -> dict[str, str]:
+    get = _text_of(fetcher)
+    texts = {}
+    for u in sources:                       # same fallback as Proposer.propose
+        try:
+            texts[u] = get(u) or ""
+        except Exception as e:
+            texts[u] = f"(could not fetch: {type(e).__name__})"
+    return texts
+
+
+def replay_main(path: str, cases_path: Optional[str], snapshots: Optional[str]) -> int:
+    try:
+        with open(path, encoding="utf-8") as f:
+            run = json.load(f)
+        rows, diffs, notes = replay_rows(run, cases_path, snapshots)
+    except (OSError, ValueError, ReplayError) as e:
+        print(f"replay: {e}", file=sys.stderr)
+        return 2
+    for n in notes:
+        print(f"note: {n}")
+    if diffs:
+        print(f"REPLAY MISMATCH: {len(diffs)} difference(s) in {path}")
+        for d in diffs:
+            print(f"  - {d}")
+        return 1
+    print(f"replay OK: {len(rows)} row(s) replayed, decisions identical "
+          f"(llm label {(run.get('summary') or {}).get('llm')}; no model was called)")
     return 0
 
 

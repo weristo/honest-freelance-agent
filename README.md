@@ -219,6 +219,12 @@ python3.11 -m hfa verify --url https://developer.paypal.com/api/rest/ \
 
 python3.11 -m hfa eval --mock --live   # mini-eval (mock proposer, labelled MOCK),
                                         # sources fetched live (not yet in the test suite)
+
+# Model-free replay of a stored run (E33): the raw model answers saved in the
+# run file go again through parse -> verifier -> gate on the same snapshots.
+# No LLM client is created. Exit 0 = identical, 1 = differences (listed),
+# 2 = cannot replay (e.g. "no raw model output stored in this run (pre-E33)").
+python3.11 -m hfa eval --replay data/eval/runs/real/eval_<llm>.json [--snapshots DIR] [--cases FILE]
 ```
 
 The PayPal client refuses any host other than `api-m.sandbox.paypal.com`

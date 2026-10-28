@@ -3,6 +3,7 @@
   python -m hfa verify --quote "..." --url https://...   # fresh fetch + verdict
   python -m hfa verify --quote "..." --snapshot FILE     # offline, from a snapshot
   python -m hfa eval [--snapshots DIR | --live]          # mini-eval (mock proposer)
+  python -m hfa eval --replay RUN.json                   # model-free replay of a stored run (E33)
   python -m hfa budget                                   # LLM spend vs. caps
   python -m hfa paypal-smoke                             # sandbox OAuth token only
   python -m hfa demo --mock                              # no keys, llm: mock
