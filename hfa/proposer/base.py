@@ -83,7 +83,9 @@ def parse_proposal(text: str) -> tuple[Verdict, Optional[KillClass], str, list[C
         t = t.strip("`")
         t = t[t.find("{"):]
     try:
-        obj = json.loads(t[t.find("{"): t.rfind("}") + 1])
+        # strict=False: a raw control character (e.g. a newline) inside a JSON
+        # string is accepted; schema/enum errors stay visible below (E32).
+        obj = json.loads(t[t.find("{"): t.rfind("}") + 1], strict=False)
     except ValueError as e:
         raise ProposalInvalid(f"not JSON: {e}") from None
     if obj.get("decision") not in ("GO", "KILL", "NEEDS_HUMAN"):
