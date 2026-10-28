@@ -168,9 +168,12 @@ def aggregate(rows: list[dict]) -> dict:
     out = {"llm": llm, "is_mock": llm == "mock", "n_cases": len(rows), "n_ok": len(ok),
            "n_budget_exhausted": sum(r["status"] == "budget_exhausted" for r in rows),
            "prompt_sha256": prompt_sha256()}
+    errors = [r for r in rows if r["status"] == "error"]
+    out["n_errors"] = len(errors)          # no decision, nothing done (e.g. invalid proposal)
     non_go = [r for r in ok if r["gold"] != "GO"]
     go = [r for r in ok if r["gold"] == "GO"]
-    decided = [r for r in ok if r["gold"] in ("GO", "KILL", "REFUSE")]
+    decided = [r for r in ok if r["gold"] in DECIDED_GOLD]
+    decided_err = [r for r in errors if r["gold"] in DECIDED_GOLD]
     for cond in ("no_verifier", "verifier"):
         fg = sum(r[cond] == "GO" for r in non_go)
         out[cond] = {
@@ -179,9 +182,14 @@ def aggregate(rows: list[dict]) -> dict:
             "false_kill_count": sum(r[cond] in ("KILL", "REFUSE") for r in go),
             "deferral_rate": round(sum(r[cond] in ("NEEDS_HUMAN", "UNVERIFIED") for r in decided)
                                    / len(decided), 3) if decided else None,
+            # an error on a gold GO/KILL/REFUSE case is also "no decision": counted as a deferral here
+            "deferral_incl_errors": round((sum(r[cond] in ("NEEDS_HUMAN", "UNVERIFIED") for r in decided)
+                                           + len(decided_err)) / (len(decided) + len(decided_err)), 3)
+                                    if decided or decided_err else None,
             "exact_label_agreement": sum(r[cond] == r["gold"] for r in ok),
             "kill_refuse_mixups": sum({r[cond], r["gold"]} == {"KILL", "REFUSE"} for r in ok),
             "labels": dict(Counter(r[cond] for r in ok)),
+            "confusion": confusion(ok, cond),
         }
     out["n_non_go"], out["n_go"] = len(non_go), len(go)
     # Non-VERIFIED evidence by visible category; quote_outside_context is its
@@ -190,7 +198,33 @@ def aggregate(rows: list[dict]) -> dict:
     for r in ok:
         cats.update(r.get("reason_categories") or {})
     out["evidence_categories"] = dict(sorted(cats.items()))
+    out["n_quote_outside_context"] = sum(len(r.get("quotes_outside_context") or []) for r in ok)
+    out["n_user_unticked"] = sum(len(r.get("user_unticked") or {}) for r in ok)
+    out["n_rows_source_thin"] = sum(bool(r.get("source_thin")) for r in rows)
     return out
+
+
+LABELS = ("GO", "KILL", "REFUSE", "NEEDS_HUMAN", "UNVERIFIED")
+DECIDED_GOLD = ("GO", "KILL", "REFUSE")
+
+
+def confusion(ok_rows: list[dict], cond: str = "verifier") -> dict:
+    """{gold: {predicted: n}} over the ok rows (errors have no prediction)."""
+    m = {g: {p: 0 for p in LABELS} for g in LABELS}
+    for r in ok_rows:
+        m.setdefault(r["gold"], {p: 0 for p in LABELS})
+        m[r["gold"]][r[cond]] = m[r["gold"]].get(r[cond], 0) + 1
+    return m
+
+
+def format_confusion(m: dict, cond: str = "verifier") -> str:
+    cols = [p for p in LABELS]
+    lines = [f"confusion (rows: gold, columns: {cond})",
+             f"{'gold':12} " + " ".join(f"{c[:11]:>11}" for c in cols) + f" {'total':>6}"]
+    for g in LABELS:
+        row = m.get(g, {})
+        lines.append(f"{g:12} " + " ".join(f"{row.get(c, 0):>11}" for c in cols) + f" {sum(row.values()):>6}")
+    return "\n".join(lines)
 
 
 def write_results(rows: list[dict], summary: dict, out_dir: str, real: bool) -> str:
@@ -220,9 +254,19 @@ def format_table(rows: Iterable[dict], summary: dict) -> str:
         lines.append(f"{cond:12} false_GO={s['false_go']}/{summary['n_non_go']} "
                      f"rate={s['false_go_rate']} false_KILL={s['false_kill_count']}/{summary['n_go']} "
                      f"deferral={s['deferral_rate']} exact={s['exact_label_agreement']}/{summary['n_ok']}")
+        if "deferral_incl_errors" in s:
+            lines.append(f"{'':12} deferral_incl_errors={s['deferral_incl_errors']} "
+                         "(an error on a gold GO/KILL/REFUSE case counted as a deferral)")
         lines.append(f"{'':12} KILL<->REFUSE mix-ups={s['kill_refuse_mixups']} (not false GO; reported separately)")
+    if "n_errors" in summary:
+        lines.append(f"errors (no decision, nothing done): {summary['n_errors']}")
     if summary.get("evidence_categories") is not None:
         lines.append(f"non-VERIFIED evidence by category: {summary['evidence_categories']}")
+    for k in ("n_quote_outside_context", "n_user_unticked", "n_rows_source_thin"):
+        if k in summary:
+            lines.append(f"{k[2:]}: {summary[k]}")
+    if summary["verifier"].get("confusion"):
+        lines.append(format_confusion(summary["verifier"]["confusion"], "verifier"))
     return "\n".join(lines)
 
 
@@ -329,6 +373,9 @@ def _run_cases(cases, a, client, budget, usage_log) -> tuple[list[dict], bool]:
             row["usage"] = proposer.last_usage
             row["source_context"] = proposer.last_context
             row["quotes_outside_context"] = proposer.last_outside
+            thin = {c["source_url"]: c["thin"] for c in proposer.last_context or [] if c.get("thin")}
+            if thin:
+                row["source_thin"] = thin
             proposer.last_usage = None
         rows.append(row)
         if row["status"] == "budget_exhausted":

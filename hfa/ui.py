@@ -54,6 +54,8 @@ def render(cards: list[dict]) -> str:
         out.append(f"<div class='verdict {_e(final)}'>{_e(final)}{kc}</div>")
         if c.get("message"):
             out.append(f"<p>{_e(c['message'])}</p>")
+        for note in c.get("source_notes") or []:
+            out.append(f"<div class='undated'>{_e(note)} - note only, the decision is not changed</div>")
         for r in c.get("receipts", []):
             st = r.get("state")
             cls = "NEEDS_HUMAN_s" if st == "NEEDS_HUMAN" else st

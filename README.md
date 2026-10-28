@@ -112,7 +112,7 @@ Nothing else is needed for the core (standard library only).
 
 ```bash
 git clone <this repo> && cd honest-freelance-agent
-python3.11 -m unittest discover -s tests -t .      # 176 tests, offline, no keys (1 skipped without the private snapshots)
+python3.11 -m unittest discover -s tests -t .      # 185 tests, offline, no keys (1 skipped without the private snapshots)
 ```
 
 ## Run

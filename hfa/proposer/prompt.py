@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 
-PROMPT_VERSION = "p4"
+PROMPT_VERSION = "p5"
 
 SYSTEM_PROMPT = """You are the proposer in an honest freelance agent.
 You read a freelance opportunity (or a quote / invoice step) and the platform
@@ -23,6 +23,7 @@ Rules:
   "quote" of at least 20 characters, the exact "source_url" and a "rule_id".
 - polarity "SUPPORTS" if the fact supports going ahead, "CONTRADICTS" if it
   argues against the user's plan.
+- polarity: exactly "SUPPORTS" or "CONTRADICTS", no other value. A background fact that neither supports nor contradicts the plan: polarity "SUPPORTS" and critical false.
 - Reasoning that combines facts (arithmetic, "these two rules conflict") is
   a claim with kind "INFERENCE" and "derived_from" listing claim ids.
 - Statements only the user can know (their income, their client history,

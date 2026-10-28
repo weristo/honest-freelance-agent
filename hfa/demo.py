@@ -180,6 +180,12 @@ def card(res: RunResult, user_unticked: Optional[dict] = None) -> dict:
     return out
 
 
+def source_notes(context: list[dict]) -> list[str]:
+    """Visible notes about the source text given to the model (e.g. "source
+    text thin (812 chars)"). Notes only: the decision is not changed."""
+    return [f"{c['source_url']}: {c['thin']}" for c in context or [] if c.get("thin")]
+
+
 def _mock_invoice(res: RunResult, amount: str) -> dict:
     pp = SandboxClient("mock-id", "mock-secret", transport=_FakeSandbox())
     inv = build_invoice(recipient_email="buyer@example.com", currency="USD",
@@ -271,6 +277,7 @@ def run_real(invoice: bool, request: Optional[str] = None, sources: Optional[lis
         c["banner"] = "llm: unavailable - no key file / no key; nothing was sent to any model"
     c["usage"] = getattr(proposer, "last_usage", None)
     c["source_context"] = proposer.last_context
+    c["source_notes"] = source_notes(proposer.last_context)
     c["quotes_outside_context"] = proposer.last_outside
     if invoice:
         if not res.decision or res.decision.final.value != "GO":

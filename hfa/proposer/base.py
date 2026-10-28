@@ -20,6 +20,13 @@ from .usernums import USER_NUMBER_NOT_IN_INPUT, missing_numbers
 OUTSIDE_CONTEXT_MARK = "[quote outside the text given to the model] "
 OUTSIDE_CONTEXT_REASON = "quote outside the text given to the model (verifier code: QUOTE_TOO_SHORT)"
 OUTSIDE_CONTEXT_CATEGORY = "quote_outside_context"
+# A source text passed to the model shorter than this is flagged as thin. Only
+# a visible note (trace, card, eval row); it never changes the decision.
+THIN_SOURCE_CHARS = 2000
+
+
+def thin_note(passed_chars: int) -> Optional[str]:
+    return f"source text thin ({passed_chars} chars)" if passed_chars < THIN_SOURCE_CHARS else None
 
 
 def visible_reason(claim, evidence) -> tuple[str, str]:
@@ -206,12 +213,23 @@ class Proposer:
         user = render_user(request, sources, texts)
         label = self.client.label
         ph = prompt_sha256()
-        context = [{"source_url": u, "original_chars": len(t), "passed_chars": min(len(t), SOURCE_TEXT_LIMIT),
-                    "truncated": len(t) > SOURCE_TEXT_LIMIT} for u, t in texts.items()]
+        context = []
+        for u, t in texts.items():
+            passed = min(len(t), SOURCE_TEXT_LIMIT)
+            entry = {"source_url": u, "original_chars": len(t), "passed_chars": passed,
+                     "truncated": len(t) > SOURCE_TEXT_LIMIT}
+            note = thin_note(passed)
+            if note:
+                entry["thin"] = note
+            context.append(entry)
         self.last_context, self.last_outside, self.last_user_unticked = context, [], {}
         if context:
             self._log({"llm": label, "event": "source_context", "limit_chars": SOURCE_TEXT_LIMIT,
                        "sources": context})
+        thin = {c["source_url"]: c["thin"] for c in context if c.get("thin")}
+        if thin:
+            self._log({"llm": label, "event": "source_thin", "sources": thin,
+                       "effect": "note only; the decision is not changed"})
         if self.client.provider == "unavailable":
             msg = f"llm: unavailable - {getattr(self.client, 'reason', '')}"
             self._log({"llm": "unavailable", "status": "unavailable", "message": msg})
