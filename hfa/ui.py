@@ -63,7 +63,9 @@ def render(cards: list[dict]) -> str:
                 out.append(f"<blockquote>{_e(r['quote'])}</blockquote>")
             elif r.get("text"):
                 tick = "user confirmed" if r.get("user_confirmed") else "NOT confirmed by the user"
-                out.append(f"<blockquote>{_e(r['text'])} <i>({tick})</i></blockquote>")
+                if r.get("user_tick_reason"):
+                    tick = f"NOT ticked: {r['user_tick_reason']}"
+                out.append(f"<blockquote>{_e(r['text'])} <i>({_e(tick)})</i></blockquote>")
             if r.get("source_url"):
                 out.append(f"<div>source: <a href='{_e(r['source_url'])}'>{_e(r['source_url'])}</a></div>")
             if r.get("source_sha256"):

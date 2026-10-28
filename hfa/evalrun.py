@@ -30,13 +30,15 @@ from .fetcher import FixtureFetcher, LiveFetcher
 from .models import EvidenceState, KillClass, Verdict
 from .pipeline import decide_from_proposal
 from .proposer.base import Proposer, visible_reason
-from .proposer.prompt import prompt_sha256
+from .proposer.prompt import SOURCE_TEXT_LIMIT, SYSTEM_PROMPT, prompt_sha256, render_user
 from . import holdout as holdout_mod
 from .normalize import norm
-from .proposer.budget import Budget
+from .proposer.budget import Budget, UnknownPrice, cost_usd, estimate_tokens
 from .proposer.providers import MockClient, client_from_env
 
 MOCK_BANNER = "MOCK - pipeline test, not a model measurement"
+DEFAULT_SNAPSHOTS = "data/private/snapshots"
+MAX_TOKENS = 2000           # the Proposer's default output cap, also used for the estimate
 
 
 class MixedLLMError(ValueError):
@@ -147,6 +149,9 @@ def run_case(case: dict, proposer: Proposer, fetcher) -> dict:
     shown = [(e, *visible_reason(claims.get(e.claim_id), e)) for e in d.evidence]
     row["reasons"] = [f"{e.claim_id}:{e.state.value}:{cat}" for e, _, cat in shown]
     row["reason_texts"] = {e.claim_id: text for e, text, _ in shown}
+    if pr.user_unticked:                 # user tick withheld: a number not in the user's input
+        row["user_unticked"] = dict(pr.user_unticked)
+        row["reason_texts"].update(pr.user_unticked)
     row["reason_categories"] = dict(Counter(cat for e, _, cat in shown if e.state.value != "VERIFIED"))
     row["gate_log"] = d.gate_log
     return row
@@ -224,8 +229,10 @@ def format_table(rows: Iterable[dict], summary: dict) -> str:
 def main(argv: Optional[list[str]] = None) -> int:
     ap = argparse.ArgumentParser(prog="hfa eval")
     ap.add_argument("--cases", default="data/eval/cases_public.jsonl")
-    ap.add_argument("--snapshots", default="data/private/snapshots",
-                    help="directory of full-text source snapshots (not in the repo)")
+    ap.add_argument("--snapshots", default=DEFAULT_SNAPSHOTS,
+                    help="directory of full-text source snapshots (not in the repo; the default "
+                         f"{DEFAULT_SNAPSHOTS} does not exist in a fresh clone - pass the eval owner's "
+                         "directory, e.g. --snapshots ~/ai-collab/002-cash/prep/eval_snapshots)")
     ap.add_argument("--live", action="store_true", help="fetch sources live instead of snapshots")
     ap.add_argument("--holdout", metavar="FILE", help="holdout file (pinned hash; frozen, real model, once)")
     ap.add_argument("--frozen-prompt-sha")
@@ -254,20 +261,68 @@ def main(argv: Optional[list[str]] = None) -> int:
     else:
         cases = dev_cases(load_cases(a.cases))
     if not a.live and not os.path.isdir(a.snapshots):
-        print(f"snapshot dir {a.snapshots!r} not found; use --live to fetch sources fresh", file=sys.stderr)
+        print(f"snapshot dir {a.snapshots!r} not found. The snapshots are not in the repository; "
+              f"pass --snapshots DIR (the eval owner keeps them in ~/ai-collab/002-cash/prep/eval_snapshots) "
+              f"or use --live to fetch sources fresh", file=sys.stderr)
         return 2
+    if a.holdout and not a.live:
+        missing = sorted({p for c in cases for p in _snapshot_map(c, a.snapshots).values()
+                          if not os.path.isfile(p)})
+        if missing:
+            print(f"holdout not started (no lock written): {len(missing)} snapshot file(s) missing: "
+                  f"{[os.path.basename(p) for p in missing]}", file=sys.stderr)
+            return 2
 
     rows: list[dict] = []
     budget = None if a.mock else Budget()
     usage_log = None if a.mock else os.path.join(a.out, "real", "usage.jsonl")
-    complete = True
+    if a.holdout:
+        # Budget pre-check BEFORE the lock and before any call: all cases x 1.5
+        # must fit both the remaining daily and the remaining total budget.
+        try:
+            est = estimate_cost(cases, client.model)
+            pre = holdout_mod.budget_precheck(est, budget.status())
+        except (holdout_mod.BudgetTooSmall, UnknownPrice) as e:
+            print(str(e), file=sys.stderr)
+            return 4
+        holdout_mod.start_run({"llm": client.label, "n_cases": len(cases), "prompt_sha256": prompt_sha256(),
+                               "decision_code_sha256": holdout_mod.decision_code_sha256(),
+                               "budget_precheck": pre})
+        try:
+            rows, complete = _run_cases(cases, a, client, budget, usage_log)
+            summary = aggregate(rows)
+        except BaseException as e:
+            holdout_mod.finish_run("ABORTED", error=f"{type(e).__name__}: {e}")
+            raise
+        summary["complete"] = complete and len(rows) == len(cases)
+        summary["split"] = "holdout"
+        try:
+            path = write_results(rows, summary, a.out, real=True)
+        finally:
+            holdout_mod.finish_run("COMPLETE" if summary["complete"] else "INCOMPLETE", summary)
+    else:
+        rows, complete = _run_cases(cases, a, client, budget, usage_log)
+        summary = aggregate(rows)
+        summary["complete"] = complete and len(rows) == len(cases)
+        summary["split"] = "dev"
+        path = write_results(rows, summary, a.out, real=not summary["is_mock"])
+    print(format_table(rows, summary))
+    if not summary["complete"]:
+        print("INCOMPLETE RUN - do not report these numbers as a full eval")
+    print(f"written: {path}")
+    return 0
+
+
+def _run_cases(cases, a, client, budget, usage_log) -> tuple[list[dict], bool]:
+    rows: list[dict] = []
     for case in cases:
         fetcher = LiveFetcher() if a.live else FixtureFetcher(_snapshot_map(case, a.snapshots))
         if a.mock:
             proposer = Proposer(MockClient(lambda s, u, c=case: json.dumps(naive_proposal(c))),
-                                user_confirm=case_user_tick(case))
+                                user_confirm=case_user_tick(case), user_input=case_user_input(case))
         else:
-            proposer = Proposer(client, budget, usage_log=usage_log, user_confirm=case_user_tick(case),
+            proposer = Proposer(client, budget, max_tokens=MAX_TOKENS, usage_log=usage_log,
+                                user_confirm=case_user_tick(case), user_input=case_user_input(case),
                                 source_text=_text_of(fetcher))
         row = run_case(case, proposer, fetcher)
         if not a.mock:
@@ -277,20 +332,29 @@ def main(argv: Optional[list[str]] = None) -> int:
             proposer.last_usage = None
         rows.append(row)
         if row["status"] == "budget_exhausted":
-            complete = False
             print(f"budget_exhausted at {case['id']}: stopping; no further model calls", file=sys.stderr)
-            break
-    summary = aggregate(rows)
-    summary["complete"] = complete and len(rows) == len(cases)
-    summary["split"] = "holdout" if a.holdout else "dev"
-    path = write_results(rows, summary, a.out, real=not summary["is_mock"])
-    if a.holdout and not a.mock:
-        holdout_mod.record_run(summary)
-    print(format_table(rows, summary))
-    if not summary["complete"]:
-        print("INCOMPLETE RUN - do not report these numbers as a full eval")
-    print(f"written: {path}")
-    return 0
+            return rows, False
+    return rows, True
+
+
+def estimate_cost(cases: list[dict], model: str, max_tokens: int = MAX_TOKENS) -> float:
+    """Upper-bound USD estimate for one call per case: the prompt with every
+    source at the full SOURCE_TEXT_LIMIT characters (the most the model is
+    given), the conservative ~3 chars/token count of the budget module, and
+    the whole max_tokens as output. Same price table as the Budget."""
+    total = 0.0
+    for c in cases:
+        sources = sorted({cl["url"] for cl in c.get("claims") or []})
+        user = render_user(c["input"], sources, {u: "x" * SOURCE_TEXT_LIMIT for u in sources})
+        total += cost_usd(model, estimate_tokens(SYSTEM_PROMPT + user), max_tokens)
+    return total
+
+
+def case_user_input(case: dict) -> str:
+    """The user's own words in an eval case: the request text plus the
+    case's recorded user statement. USER_ATTESTED numbers are checked
+    against this text only (never against the sources or the model)."""
+    return " ".join(t for t in (case.get("input"), case.get("user_attested")) if t)
 
 
 def case_user_tick(case: dict) -> bool:

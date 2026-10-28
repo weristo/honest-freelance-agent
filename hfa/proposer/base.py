@@ -15,6 +15,7 @@ from ..models import Claim, KillClass, Verdict
 from .budget import PRICE_SOURCE, Budget, BudgetExhausted, UnknownPrice, cost_usd, estimate_tokens
 from ..normalize import norm
 from .prompt import SOURCE_TEXT_LIMIT, SYSTEM_PROMPT, prompt_sha256, render_user
+from .usernums import USER_NUMBER_NOT_IN_INPUT, missing_numbers
 
 OUTSIDE_CONTEXT_MARK = "[quote outside the text given to the model] "
 OUTSIDE_CONTEXT_REASON = "quote outside the text given to the model (verifier code: QUOTE_TOO_SHORT)"
@@ -62,6 +63,7 @@ class ProposerResult:
     usage: Optional[dict] = None        # tokens + estimated USD; never a key or key id
     context: list[dict] = field(default_factory=list)       # per source: lengths, truncated?
     outside_context: list[str] = field(default_factory=list)  # claim ids quoted from cut-off text
+    user_unticked: dict = field(default_factory=dict)  # claim id -> reason the user's tick was withheld
 
 
 class ProposalInvalid(ValueError):
@@ -137,12 +139,39 @@ def mark_outside_context(claims, texts: dict[str, str]) -> list[str]:
     return flagged
 
 
+def apply_user_tick(claims, user_confirm: bool, user_input: str) -> dict:
+    """Set the user's tick on USER_ATTESTED claims (the model never sets it).
+    A claim with a number that is not in the user's own input stays unticked,
+    whatever the user ticked: the model may have written its own number in
+    the user's name. Returns {claim_id: reason} for the claims left unticked
+    for that reason."""
+    unticked = {}
+    for c in claims:
+        if c.kind.value != "USER_ATTESTED":
+            continue
+        c.user_confirmed = False
+        if not user_confirm:
+            continue
+        missing = missing_numbers(c.text, user_input or "")
+        if missing:
+            unticked[c.claim_id] = f"{USER_NUMBER_NOT_IN_INPUT}: {', '.join(missing)}"
+        else:
+            c.user_confirmed = True
+    return unticked
+
+
 class Proposer:
     def __init__(self, client: LLMClient, budget: Optional[Budget] = None, max_tokens: int = 2000,
                  usage_log: Optional[str] = None, user_confirm: bool = False,
-                 source_text: Optional[Callable[[str], str]] = None):
+                 source_text: Optional[Callable[[str], str]] = None,
+                 user_input: Optional[str] = None):
         """user_confirm: the USER's own tick (CLI --user-confirm / UI field) for
-        the USER_ATTESTED claims of this run; never taken from the model.
+        the USER_ATTESTED claims of this run; never taken from the model. It
+        lands only on a USER_ATTESTED claim whose every number appears in the
+        user's own input (see usernums); the others stay unticked with the
+        reason USER_NUMBER_NOT_IN_INPUT.
+        user_input: the user's own text the numbers are checked against
+        (default: the request passed to propose()).
         source_text: optional url -> text provider; the text is given to the
         model as context so it can quote verbatim (the verifier still fetches
         and checks every quote independently)."""
@@ -152,6 +181,8 @@ class Proposer:
         self.usage_log = usage_log
         self.user_confirm = user_confirm
         self.source_text = source_text
+        self.user_input = user_input
+        self.last_user_unticked: dict = {}
         self.last_usage: Optional[dict] = None
         self.last_context: list[dict] = []
         self.last_outside: list[str] = []
@@ -177,7 +208,7 @@ class Proposer:
         ph = prompt_sha256()
         context = [{"source_url": u, "original_chars": len(t), "passed_chars": min(len(t), SOURCE_TEXT_LIMIT),
                     "truncated": len(t) > SOURCE_TEXT_LIMIT} for u, t in texts.items()]
-        self.last_context, self.last_outside = context, []
+        self.last_context, self.last_outside, self.last_user_unticked = context, [], {}
         if context:
             self._log({"llm": label, "event": "source_context", "limit_chars": SOURCE_TEXT_LIMIT,
                        "sources": context})
@@ -210,9 +241,12 @@ class Proposer:
             verdict, kill, why, claims = parse_proposal(resp.text)
         except ProposalInvalid as e:
             return ProposerResult("error", label, ph, message=f"invalid proposal: {e}", cost_usd=cost, usage=usage)
-        for c in claims:                      # the tick comes from the user, not the model
-            if c.kind.value == "USER_ATTESTED":
-                c.user_confirmed = bool(self.user_confirm)
+        unticked = apply_user_tick(claims, self.user_confirm,
+                                   request if self.user_input is None else self.user_input)
+        self.last_user_unticked = unticked
+        if unticked:
+            self._log({"llm": label, "event": "user_unticked", "claims": unticked,
+                       "effect": "user tick withheld -> G5 -> no GO"})
         outside = mark_outside_context(claims, texts)
         self.last_outside = outside
         if outside:
@@ -220,4 +254,4 @@ class Proposer:
                        "reason": OUTSIDE_CONTEXT_REASON,
                        "effect": "quote removed before verification -> UNVERIFIED"})
         return ProposerResult("ok", label, ph, verdict, kill, why, claims, cost_usd=cost, usage=usage,
-                              context=context, outside_context=outside)
+                              context=context, outside_context=outside, user_unticked=unticked)

@@ -12,14 +12,27 @@ Rules (enforced here, see EVAL_CHANGELOG.md):
                                              (hash of the proposer prompt)
    each freeze is final (the file is never overwritten);
  - the holdout runs only when both freezes exist and both hashes still
-   match, only with a real model (never mock), and only once: the first run
-   writes data/eval/HOLDOUT_RUN.json and every later attempt is refused.
+   match, only with a real model (never mock), and only once: BEFORE the
+   first model call the run creates data/eval/HOLDOUT_RUN.json atomically
+   (open 'x') with state STARTED; at the end it is filled in (COMPLETE or
+   INCOMPLETE, or ABORTED if the run raised). A lock in ANY state - also a
+   STARTED lock left behind by a crash - refuses every later attempt;
+ - nothing unlocks automatically. Only the eval owner (002) can decide to
+   void a lock, by hand (README, "Voiding a holdout lock"): rename
+   HOLDOUT_RUN.json to HOLDOUT_RUN.void-<UTC>.json and put the decision and
+   the reason in HOLDOUT_RUN.void-<UTC>.reason.txt; a voided lock without a
+   reason file blocks the run as well;
+ - before the started lock is written, a budget pre-check must pass: the
+   estimated cost of all cases x 1.5 must be below the remaining daily AND
+   the remaining total budget, otherwise the run does not start.
 """
 from __future__ import annotations
 
+import glob
 import hashlib
 import json
 import os
+import tempfile
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -32,6 +45,10 @@ PINNED_HOLDOUT_SHA256 = {
 FREEZE_PATHS = {"gate": os.path.join("data", "eval", "FREEZE_GATE.json"),
                 "prompt": os.path.join("data", "eval", "FREEZE_PROMPT.json")}
 RUN_LOCK_PATH = os.path.join("data", "eval", "HOLDOUT_RUN.json")
+BUDGET_SAFETY_FACTOR = 1.5
+UNLOCK_HELP = ("only the eval owner (002) can void it, by hand: rename the lock to "
+               "HOLDOUT_RUN.void-<UTC>.json and write the decision + reason into "
+               "HOLDOUT_RUN.void-<UTC>.reason.txt (README: 'Voiding a holdout lock')")
 
 # Source files whose behaviour decides the verdict. Their combined hash is frozen.
 DECISION_MODULES = ("normalize.py", "extract.py", "fetcher.py", "verifier.py",
@@ -114,8 +131,7 @@ def authorize_run(llm: str, frozen_prompt_sha: Optional[str],
     paths = freeze_paths or FREEZE_PATHS
     if llm == "mock":
         raise HoldoutLocked("the holdout is never run with the mock proposer")
-    if os.path.exists(lock_path):
-        raise HoldoutLocked(f"holdout already run once ({lock_path}); no re-runs")
+    check_lock(lock_path)
     missing = [k for k in ("gate", "prompt") if not os.path.exists(paths[k])]
     if missing:
         raise HoldoutLocked(f"not frozen yet: {missing} (python -m hfa eval --freeze gate|prompt)")
@@ -131,7 +147,95 @@ def authorize_run(llm: str, frozen_prompt_sha: Optional[str],
     return {"gate": gate, "prompt": prompt}
 
 
+def _now() -> str:
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def check_lock(lock_path: str = RUN_LOCK_PATH) -> None:
+    """Refuse if the holdout lock exists in any state, or if a voided lock
+    has no reason file. Never removes or renames anything."""
+    if os.path.exists(lock_path):
+        try:
+            with open(lock_path, encoding="utf-8") as f:
+                st = json.load(f).get("state", "COMPLETE (old format)")
+        except (OSError, ValueError):
+            st = "unreadable"
+        if st == "STARTED":
+            raise HoldoutLocked(
+                f"holdout run was STARTED and never finished ({lock_path}; crash or kill?). "
+                f"No re-run: {UNLOCK_HELP}")
+        raise HoldoutLocked(f"holdout already run once ({lock_path}, state {st}); no re-runs. {UNLOCK_HELP}")
+    base, _ = os.path.splitext(lock_path)
+    for v in sorted(glob.glob(glob.escape(base) + ".void-*.json")):
+        reason = v[:-len(".json")] + ".reason.txt"
+        text = ""
+        if os.path.exists(reason):
+            with open(reason, encoding="utf-8") as f:
+                text = f.read().strip()
+        if not text:
+            raise HoldoutLocked(f"voided lock {v} has no (or an empty) reason file {reason}; "
+                                "the eval owner (002) must record the decision and the reason")
+
+
+def start_run(info: dict, lock_path: str = RUN_LOCK_PATH) -> dict:
+    """Write the STARTED lock before the first model call. Atomic: open 'x'
+    fails if any lock exists (also one created by a parallel run)."""
+    check_lock(lock_path)
+    rec = {"state": "STARTED", "started_at": _now(), **info}
+    os.makedirs(os.path.dirname(lock_path) or ".", exist_ok=True)
+    try:
+        with open(lock_path, "x", encoding="utf-8") as f:
+            json.dump(rec, f, indent=1)
+            f.flush()
+            os.fsync(f.fileno())
+    except FileExistsError:
+        raise HoldoutLocked(f"holdout lock {lock_path} appeared meanwhile; no re-runs") from None
+    return rec
+
+
+def finish_run(state: str, summary: Optional[dict] = None, error: Optional[str] = None,
+               lock_path: str = RUN_LOCK_PATH) -> dict:
+    """Fill in the STARTED lock (COMPLETE / INCOMPLETE / ABORTED). The lock
+    stays; it is replaced atomically, never deleted."""
+    with open(lock_path, encoding="utf-8") as f:
+        rec = json.load(f)
+    if rec.get("state") != "STARTED":
+        raise HoldoutLocked(f"lock {lock_path} is {rec.get('state')}, not STARTED; not overwriting")
+    rec.update(state=state, finished_at=_now(), ran_at=_now())
+    if summary is not None:
+        rec["summary"] = summary
+    if error is not None:
+        rec["error"] = error
+    d = os.path.dirname(lock_path) or "."
+    fd, tmp = tempfile.mkstemp(dir=d, prefix=".holdout_lock.", suffix=".tmp")
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
+        json.dump(rec, f, indent=1)
+        f.flush()
+        os.fsync(f.fileno())
+    os.replace(tmp, lock_path)
+    return rec
+
+
 def record_run(summary: dict, lock_path: str = RUN_LOCK_PATH) -> None:
-    with open(lock_path, "x", encoding="utf-8") as f:   # 'x': fails if it exists
-        json.dump({"ran_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-                   "summary": summary}, f, indent=1)
+    """One-step lock (kept for callers/tests that record a finished run)."""
+    start_run({}, lock_path)
+    finish_run("COMPLETE" if summary.get("complete", True) else "INCOMPLETE", summary, lock_path=lock_path)
+
+
+class BudgetTooSmall(PermissionError):
+    pass
+
+
+def budget_precheck(estimated_usd: float, status, factor: float = BUDGET_SAFETY_FACTOR) -> dict:
+    """estimated_usd x factor must be below the remaining daily AND total budget."""
+    need = estimated_usd * factor
+    left_day = status.daily_cap - status.spent_today
+    left_total = status.total_cap - status.spent_total
+    rec = {"estimated_usd": round(estimated_usd, 6), "factor": factor, "needed_usd": round(need, 6),
+           "remaining_daily_usd": round(left_day, 6), "remaining_total_usd": round(left_total, 6)}
+    if not (need < left_day and need < left_total):
+        raise BudgetTooSmall(
+            f"holdout not started: estimated ${estimated_usd:.4f} x {factor} = ${need:.4f} is not below "
+            f"the remaining daily ${left_day:.4f} and total ${left_total:.4f} budget "
+            "(no lock written, no model call made)")
+    return rec

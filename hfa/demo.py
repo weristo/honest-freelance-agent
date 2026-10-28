@@ -99,7 +99,7 @@ FEE_QUOTE = "For fixed price projects the freelancer service fee is 8% of the pr
 
 # (request, scripted proposal, scripted user tick)
 MOCK_SCENARIOS = [
-    ("Invoice my client for the finished logo milestone (USD 120) through PayPal.",
+    ("Invoice my client for the finished logo milestone (USD 120) through PayPal; I need at least 100 USD net.",
      {"decision": "GO", "rationale": "Invoicing completed milestones is allowed.", "claims": [
          _claim("c1", "Freelancers may invoice clients for completed milestones through a supported payment provider."),
          _claim("c2", FEE_QUOTE),
@@ -148,8 +148,11 @@ class _FakeSandbox:
 
 # --- cards --------------------------------------------------------------------
 
-def card(res: RunResult) -> dict:
-    """Decision card as JSON (rendered by `hfa ui`, printed by `hfa demo`)."""
+def card(res: RunResult, user_unticked: Optional[dict] = None) -> dict:
+    """Decision card as JSON (rendered by `hfa ui`, printed by `hfa demo`).
+    user_unticked: {claim_id: reason} from the proposer for USER_ATTESTED
+    claims whose tick was withheld (a number not in the user's input)."""
+    user_unticked = user_unticked or {}
     d = res.decision
     out = {"llm": res.llm, "status": res.status, "message": res.message}
     if d:
@@ -166,6 +169,7 @@ def card(res: RunResult) -> dict:
                 "verifier_reason_code": e.reason_code.value,
                 "source_url": c.source_url if c else None,
                 "user_confirmed": c.user_confirmed if c else None,
+                "user_tick_reason": user_unticked.get(e.claim_id),
                 "state": e.state.value, "reason": reason, "layer": e.match_layer,
                 "source_sha256": e.raw_sha256, "snippet_sha256": e.snippet_sha256,
                 "fetched_at": e.fetched_at, "nearest_span": e.nearest_span,
@@ -189,9 +193,11 @@ def run_mock() -> list[dict]:
     cards = []
     for request, proposal, tick in MOCK_SCENARIOS:
         client = MockClient(lambda s, u, p=proposal: json.dumps(p))
-        res = run(request, [DEMO_URL], Proposer(client, user_confirm=tick), fixture)
+        proposer = Proposer(client, user_confirm=tick)
+        res = run(request, [DEMO_URL], proposer, fixture)
         c = {"banner": MOCK_BANNER, "request": request,
-             "user_tick": "scripted user input (mock demo)" if tick else "none", **card(res)}
+             "user_tick": "scripted user input (mock demo)" if tick else "none",
+             **card(res, proposer.last_user_unticked)}
         if res.decision and res.decision.final.value == "GO":
             c["invoice"] = _mock_invoice(res, "120.00")
         cards.append(c)
@@ -230,10 +236,11 @@ def run_job(price: str, cost: str, platform: str, mock: bool, user_confirm: bool
         proposal = {"decision": "GO", "rationale": "(the mock says GO; the code does the sum)", "claims": [
             _claim("c2", FEE_QUOTE), _user("u1", request), _net_calc("k1", price, cost, str(net))]}
         client = MockClient(lambda s, u: json.dumps(proposal))
-        res = run(request, [url], Proposer(client, user_confirm=user_confirm), _DemoFixture())
+        proposer = Proposer(client, user_confirm=user_confirm)
+        res = run(request, [url], proposer, _DemoFixture())
         c = {"banner": MOCK_BANNER, "request": request,
              "user_tick": "given (--user-confirm)" if user_confirm else "missing (pass --user-confirm)",
-             **card(res)}
+             **card(res, proposer.last_user_unticked)}
         if invoice and res.decision and res.decision.final.value == "GO":
             c["invoice"] = _mock_invoice(res, str(_num(price)))
         return c
@@ -257,7 +264,7 @@ def run_real(invoice: bool, request: Optional[str] = None, sources: Optional[lis
     proposer = Proposer(client_from_env(), Budget(), usage_log=trace, user_confirm=user_confirm,
                         source_text=_live_text(fetcher))
     res = run(request or REAL_REQUEST, sources or REAL_SOURCES, proposer, fetcher, trace_path=trace)
-    c = card(res)
+    c = card(res, proposer.last_user_unticked)
     c["request"] = request or REAL_REQUEST
     c["user_tick"] = "given (--user-confirm)" if user_confirm else "none"
     if res.status == "unavailable":

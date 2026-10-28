@@ -112,7 +112,7 @@ Nothing else is needed for the core (standard library only).
 
 ```bash
 git clone <this repo> && cd honest-freelance-agent
-python3.11 -m unittest discover -s tests -t .      # 162 tests, offline, no keys (1 skipped without the private snapshots)
+python3.11 -m unittest discover -s tests -t .      # 176 tests, offline, no keys (1 skipped without the private snapshots)
 ```
 
 ## Run
@@ -174,6 +174,14 @@ python3.11 -m hfa demo --price 30 --cost 26 --platform freelancer --user-confirm
 `--user-confirm` is **your** tick on the numbers you typed (G5). The model can
 never set it: any `user_confirmed` in the model's output is discarded when it
 is parsed. Without the tick the result is NEEDS_HUMAN.
+The tick also covers only **your** numbers: it lands on a USER_ATTESTED claim
+only if every number in that claim (read as a Decimal, with its currency or
+`%`) appears in what you typed (the CLI fields; in the eval, the case's input).
+If the model writes its own "user" number (`my cost is 20 USD` while you
+typed 26), that claim stays unticked with the reason *"user number not in the
+user's input"*, and the result cannot be GO. `26`, `26.00`, `26 USD`,
+`USD 26` and `$26` are the same number; `26 EUR` and `26%` are not; a number
+with a currency needs that currency in your input.
 
 **Local UI.** The same cards in a browser, served only on `127.0.0.1`
 (standard library, no external scripts or styles, nothing hosted):
@@ -271,7 +279,42 @@ freeze has two final steps, issued by the eval owner: `python3.11 -m hfa eval
 proposer prompt). Each step only writes a file (`data/eval/FREEZE_GATE.json`
 or `data/eval/FREEZE_PROMPT.json`, created once, never overwritten); it
 makes no git commit. The holdout runs only when both exist and still match,
-never with the mock, and only once. Status: gate frozen at 3d30ac0; the prompt is not frozen yet. Every gold or coding change before the freeze is logged in
+never with the mock, and only once.
+
+Running it: the snapshots are not in the repository and the default
+`--snapshots data/private/snapshots` does not exist in a fresh clone (the run
+stops with a message saying so). The eval owner's copy is
+`~/ai-collab/002-cash/prep/eval_snapshots/` (all files the 11 holdout cases
+reference; R07 uses `T08.txt`):
+
+```bash
+python3.11 -m hfa eval --holdout data/eval/holdout_public.jsonl \
+  --frozen-prompt-sha <hash from FREEZE_PROMPT.json> \
+  --snapshots ~/ai-collab/002-cash/prep/eval_snapshots
+```
+
+Before the first model call the run checks that every referenced snapshot
+exists and that the **budget** fits: the estimated cost of all cases (every
+source at the full 12 000 characters given to the model, ~3 chars per token,
+the whole `max_tokens` as output, same price table as the cost guard) x 1.5
+must be below both the remaining daily and the remaining total budget;
+otherwise nothing starts (exit 4, no lock, no call). Then it writes
+`data/eval/HOLDOUT_RUN.json` atomically with state `STARTED`, and fills it in
+at the end (`COMPLETE`, `INCOMPLETE`, or `ABORTED` with the error if the run
+raised). A lock in any state - also a `STARTED` lock left behind by a crash
+or a kill - refuses every later run.
+
+**Voiding a holdout lock** (eval owner 002 only, by hand; nothing unlocks
+automatically): rename the lock and record the decision and the reason next
+to it, then add an EVAL_CHANGELOG entry.
+
+```bash
+ts=$(date -u +%Y%m%dT%H%M%SZ)
+mv data/eval/HOLDOUT_RUN.json data/eval/HOLDOUT_RUN.void-$ts.json
+echo "002 decision <date>: <why the run is void, what was seen>" > data/eval/HOLDOUT_RUN.void-$ts.reason.txt
+```
+
+A voided lock without a (non-empty) reason file blocks the run as well. Status: gate frozen at 3d30ac0; the prompt is not frozen yet. Every gold or coding change before the freeze is logged in
 [EVAL_CHANGELOG.md](EVAL_CHANGELOG.md), including whether it was made after
 seeing mock results.
 
