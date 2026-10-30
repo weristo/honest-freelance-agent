@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 
-PROMPT_VERSION = "p6"
+PROMPT_VERSION = "p7"
 
 SYSTEM_PROMPT = """You are the proposer in an honest freelance agent.
 You read a freelance opportunity (or a quote / invoice step) and the platform
@@ -73,6 +73,11 @@ OUTPUT_SCHEMA = {
         },
     },
 }
+
+# p7 (E35): the schema itself goes to the model (before p7 it was only hashed).
+# Same serialization as in prompt_sha256 (sort_keys, ensure_ascii=False), no indent.
+SYSTEM_PROMPT = (SYSTEM_PROMPT + "\nThe JSON object must match this JSON Schema exactly (key names included):\n"
+                 + json.dumps(OUTPUT_SCHEMA, sort_keys=True, ensure_ascii=False))
 
 USER_TEMPLATE = """Opportunity / request:
 <<<
