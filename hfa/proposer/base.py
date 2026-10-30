@@ -94,9 +94,12 @@ def parse_proposal(text: str) -> tuple[Verdict, Optional[KillClass], str, list[C
     kc = obj.get("kill_class")
     kill = KillClass(kc) if kc else None
     claims = []
+    ids_missing = False
     for i, c in enumerate(obj.get("claims") or []):
         if not isinstance(c, dict):
             raise ProposalInvalid(f"claim {i} is not an object")
+        if "claim_id" not in c:
+            ids_missing = True
         c.setdefault("claim_id", f"c_{i:02d}")
         c.setdefault("text", c.get("quote", ""))
         try:
@@ -106,7 +109,24 @@ def parse_proposal(text: str) -> tuple[Verdict, Optional[KillClass], str, list[C
         if claim.kind.value == "FACT" and (not claim.quote or not claim.source_url):
             raise ProposalInvalid(f"FACT claim {claim.claim_id} needs quote and source_url")
         claims.append(claim)
+    if ids_missing and _unresolved_refs(claims):
+        # E34: the model left out claim_id but its CALC/INFERENCE references
+        # use its own names; the c_NN ids assigned above cannot match them.
+        # No guessed mapping: the proposal is invalid, visibly.
+        raise ProposalInvalid("claim ids missing; references unresolved")
     return Verdict(obj["decision"]), kill, str(obj.get("rationale", "")), claims
+
+
+def _unresolved_refs(claims) -> list[str]:
+    """References (calc.inputs.*.source, derived_from) to ids not in the claim list."""
+    ids = {c.claim_id for c in claims}
+    refs = []
+    for c in claims:
+        refs.extend(c.derived_from or [])
+        inputs = (c.calc or {}).get("inputs") if isinstance(c.calc, dict) else None
+        if isinstance(inputs, dict):
+            refs.extend(inp.get("source") for inp in inputs.values() if isinstance(inp, dict))
+    return [r for r in refs if r not in ids]
 
 
 def usage_record(model: str, input_tokens: int, output_tokens: int, llm: str) -> dict:
