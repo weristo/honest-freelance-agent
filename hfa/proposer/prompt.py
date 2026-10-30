@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 
-PROMPT_VERSION = "p5"
+PROMPT_VERSION = "p6"
 
 SYSTEM_PROMPT = """You are the proposer in an honest freelance agent.
 You read a freelance opportunity (or a quote / invoice step) and the platform
@@ -37,6 +37,7 @@ Rules:
   "RULE_VIOLATION"}. Expressions may use only numbers, names, + - * / ( ),
   max() and min(). Every input must come from a FACT quote or a USER_ATTESTED
   claim and its literal must appear there verbatim (e.g. "10%", "$5.00").
+- Every claim must have a claim_id: c_00, c_01, … in the order of the claims list. calc.inputs.*.source and derived_from must use exactly these ids.
 - If you cannot find a quotable source, say so: decision "NEEDS_HUMAN".
 - If a number you need is not in the request or a source, do not guess it: decision NEEDS_HUMAN.
 Return ONLY a JSON object matching the schema. No prose outside JSON."""

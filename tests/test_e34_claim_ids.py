@@ -9,6 +9,7 @@ from hfa import holdout
 from hfa.calc import run_calc
 from hfa.models import ClaimKind, Evidence, EvidenceState, Reason
 from hfa.proposer.base import ProposalInvalid, parse_proposal
+from hfa.proposer.prompt import PROMPT_VERSION, SYSTEM_PROMPT
 
 FEE = "The service fee is 10% or $5.00 USD, whichever is greater, on fixed price work."
 URL = "https://example.org/fees"
@@ -97,6 +98,12 @@ class E34ClaimIdTests(unittest.TestCase):
             c["claim_id"] = c.pop("id")
         _, _, _, claims = parse_proposal(json.dumps(o))
         self.assertEqual(claims[1].claim_id, "USER_1")
+
+    def test_prompt_p6_sentence(self):
+        self.assertEqual(PROMPT_VERSION, "p6")
+        self.assertIn("Every claim must have a claim_id: c_00, c_01, … in the order of the "
+                      "claims list. calc.inputs.*.source and derived_from must use exactly these ids.",
+                      SYSTEM_PROMPT)
 
     def test_c_gate_hash_unchanged(self):
         self.assertEqual(holdout.decision_code_sha256(), GATE_SHA)
