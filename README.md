@@ -320,19 +320,44 @@ mv data/eval/HOLDOUT_RUN.json data/eval/HOLDOUT_RUN.void-$ts.json
 echo "002 decision <date>: <why the run is void, what was seen>" > data/eval/HOLDOUT_RUN.void-$ts.reason.txt
 ```
 
-A voided lock without a (non-empty) reason file blocks the run as well. Status: gate frozen at 3d30ac0; the prompt is not frozen yet. Every gold or coding change before the freeze is logged in
-[EVAL_CHANGELOG.md](EVAL_CHANGELOG.md), including whether it was made after
-seeing mock results.
+A voided lock without a (non-empty) reason file blocks the run as well.
 
-Current numbers are **mock only** (a stand-in that says GO on every trap
-case), dev set: without verifier 32/35 false GO; with verifier + gate + CALC
-0/35, false KILL 0/5, deferral rate 5/24, KILL<->REFUSE mix-ups 0. Three of
-the five gold-GO cases are deferred (T01, T04: guard words, kept on purpose
-and reported as deferrals; T35 needs a CALC that a real proposer has to
-supply).
-This shows that the pipeline wiring works; it says nothing about any real
-model. The history of every change, including the ones made after looking
-at mock numbers, is in EVAL_CHANGELOG.md.
+### Results (real model, frozen gate + frozen prompt p5)
+
+Model `anthropic:claude-haiku-4-5`; decision code frozen (gate
+`9bc97c85...5813`), proposer prompt frozen (p5, `920ca988...2844`). Every
+run below was replayed from its stored raw model output with `hfa eval
+--replay` and gave identical decisions (exit 0).
+
+**Dev set, three runs (T1-T3, 2026-10-29):**
+
+| | without verifier | with verifier + gate + CALC |
+|---|---|---|
+| false GO | 3-5 of 33-35 non-GO cases | **0** in all three runs |
+| wrong KILL (of the 5 gold-GO cases) | 0 / 0 / 0 | 0 / 0 / 1 |
+| deferral rate | 41-46 % | 55-63 % |
+
+The one wrong KILL (T3, case T31) comes from the model labelling a neutral
+sentence ("additional terms apply") as CONTRADICTS + critical - a known
+polarity limitation, not tuned away. Errors (no decision, nothing done):
+0-2 per run (T16: model wrote text after the JSON; T21/T30: FACT claim
+without quote and source_url) - safe failures.
+
+**Holdout (11 cases, run once, 2026-10-30, lock `data/eval/HOLDOUT_RUN.json`
+state `COMPLETE`):** false GO **0/11** with verifier, 1/11 without (R07).
+The holdout contains no gold GO / KILL / REFUSE case (4 NEEDS_HUMAN, 7
+UNVERIFIED), so it does not measure wrong KILLs or the deferral rate.
+
+Total model cost of these four runs: about $0.87.
+
+**Read this as a small sample, not a benchmark:** 40 + 11 hand-labelled
+cases, one model, one prompt. It shows that the verifier and the gate stop
+false GOs on these cases at the price of more deferrals; it does not show
+how the agent performs on other questions or other models. Every gold or
+code change before the freezes is logged in
+[EVAL_CHANGELOG.md](EVAL_CHANGELOG.md), including the ones made after
+looking at mock numbers. The earlier mock-only numbers (a stand-in that
+says GO on every trap case) only showed that the pipeline wiring works.
 
 ## Known limitations
 
