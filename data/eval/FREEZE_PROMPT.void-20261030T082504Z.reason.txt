@@ -1,0 +1,1 @@
+E34 (002 decision 2026-10-30): p5 superseded by p6 — claim_id fix; p5 holdout result kept and reported
