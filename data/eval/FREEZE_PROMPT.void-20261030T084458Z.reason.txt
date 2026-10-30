@@ -1,0 +1,1 @@
+E35 (002 decision 2026-10-30): p6 superseded by p7 — OUTPUT_SCHEMA now in the system prompt; p6 3×T results kept and reported
