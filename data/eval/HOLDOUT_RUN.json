@@ -1,0 +1,145 @@
+{
+ "state": "COMPLETE",
+ "started_at": "2026-10-30T08:07:36Z",
+ "llm": "anthropic:claude-haiku-4-5",
+ "n_cases": 11,
+ "prompt_sha256": "920ca988b05c109c3fffe822b27fe6bd752db618bab00ffab7a75692bade2844",
+ "decision_code_sha256": "9bc97c853fe50e1db154d6498e7db0d4751fcb1d72ac2299c5ea636db3be5813",
+ "budget_precheck": {
+  "estimated_usd": 0.164562,
+  "factor": 1.5,
+  "needed_usd": 0.246843,
+  "remaining_daily_usd": 1.0,
+  "remaining_total_usd": 13.641716
+ },
+ "finished_at": "2026-10-30T08:08:16Z",
+ "ran_at": "2026-10-30T08:08:16Z",
+ "summary": {
+  "llm": "anthropic:claude-haiku-4-5",
+  "is_mock": false,
+  "n_cases": 11,
+  "n_ok": 11,
+  "n_budget_exhausted": 0,
+  "prompt_sha256": "920ca988b05c109c3fffe822b27fe6bd752db618bab00ffab7a75692bade2844",
+  "n_errors": 0,
+  "no_verifier": {
+   "false_go": 1,
+   "false_go_rate": 0.091,
+   "false_kill_count": 0,
+   "deferral_rate": null,
+   "deferral_incl_errors": null,
+   "exact_label_agreement": 2,
+   "kill_refuse_mixups": 0,
+   "labels": {
+    "KILL": 1,
+    "NEEDS_HUMAN": 9,
+    "GO": 1
+   },
+   "confusion": {
+    "GO": {
+     "GO": 0,
+     "KILL": 0,
+     "REFUSE": 0,
+     "NEEDS_HUMAN": 0,
+     "UNVERIFIED": 0
+    },
+    "KILL": {
+     "GO": 0,
+     "KILL": 0,
+     "REFUSE": 0,
+     "NEEDS_HUMAN": 0,
+     "UNVERIFIED": 0
+    },
+    "REFUSE": {
+     "GO": 0,
+     "KILL": 0,
+     "REFUSE": 0,
+     "NEEDS_HUMAN": 0,
+     "UNVERIFIED": 0
+    },
+    "NEEDS_HUMAN": {
+     "GO": 1,
+     "KILL": 1,
+     "REFUSE": 0,
+     "NEEDS_HUMAN": 2,
+     "UNVERIFIED": 0
+    },
+    "UNVERIFIED": {
+     "GO": 0,
+     "KILL": 0,
+     "REFUSE": 0,
+     "NEEDS_HUMAN": 7,
+     "UNVERIFIED": 0
+    }
+   }
+  },
+  "verifier": {
+   "false_go": 0,
+   "false_go_rate": 0.0,
+   "false_kill_count": 0,
+   "deferral_rate": null,
+   "deferral_incl_errors": null,
+   "exact_label_agreement": 4,
+   "kill_refuse_mixups": 0,
+   "labels": {
+    "UNVERIFIED": 2,
+    "NEEDS_HUMAN": 9
+   },
+   "confusion": {
+    "GO": {
+     "GO": 0,
+     "KILL": 0,
+     "REFUSE": 0,
+     "NEEDS_HUMAN": 0,
+     "UNVERIFIED": 0
+    },
+    "KILL": {
+     "GO": 0,
+     "KILL": 0,
+     "REFUSE": 0,
+     "NEEDS_HUMAN": 0,
+     "UNVERIFIED": 0
+    },
+    "REFUSE": {
+     "GO": 0,
+     "KILL": 0,
+     "REFUSE": 0,
+     "NEEDS_HUMAN": 0,
+     "UNVERIFIED": 0
+    },
+    "NEEDS_HUMAN": {
+     "GO": 0,
+     "KILL": 0,
+     "REFUSE": 0,
+     "NEEDS_HUMAN": 3,
+     "UNVERIFIED": 1
+    },
+    "UNVERIFIED": {
+     "GO": 0,
+     "KILL": 0,
+     "REFUSE": 0,
+     "NEEDS_HUMAN": 6,
+     "UNVERIFIED": 1
+    }
+   }
+  },
+  "n_non_go": 11,
+  "n_go": 0,
+  "evidence_categories": {
+   "FETCH_BLOCKED": 1,
+   "NOT_A_FACT": 5,
+   "QUOTE_TOO_SHORT": 1
+  },
+  "n_quote_outside_context": 0,
+  "n_user_unticked": 0,
+  "n_rows_source_thin": 4,
+  "complete": true,
+  "split": "holdout",
+  "replay_inputs": {
+   "cases": "/Users/otto/ai-collab/002-cash/prep/07_holdout_cases.jsonl",
+   "holdout": true,
+   "live": false,
+   "snapshots": "/Users/otto/ai-collab/002-cash/prep/eval_snapshots"
+  }
+ }
+}
