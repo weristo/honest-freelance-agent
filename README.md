@@ -359,6 +359,8 @@ code change before the freezes is logged in
 looking at mock numbers. The earlier mock-only numbers (a stand-in that
 says GO on every trap case) only showed that the pipeline wiring works.
 
+Prompt p6 (E34, claim_id fix) is frozen; the results above are p5 runs and are kept as reported.
+
 ## Known limitations
 
 - A string match proves the sentence is on the page, not that the page is
