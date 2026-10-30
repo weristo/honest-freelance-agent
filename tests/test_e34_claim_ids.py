@@ -41,6 +41,14 @@ def _real_shape():
         ]}
 
 
+def _no_ids(obj):
+    """The model left out claim_id AND the "id" alias; references keep its names."""
+    o = json.loads(json.dumps(obj))
+    for c in o["claims"]:
+        c.pop("id", None)
+    return o
+
+
 def _with_cnn_ids(obj):
     o = json.loads(json.dumps(obj))
     old = {}
@@ -57,13 +65,13 @@ def _with_cnn_ids(obj):
 
 class E34ClaimIdTests(unittest.TestCase):
     def test_a_real_shape_missing_ids_is_invalid(self):
-        text = "```json\n" + json.dumps(_real_shape(), indent=2) + "\n```"
+        text = "```json\n" + json.dumps(_no_ids(_real_shape()), indent=2) + "\n```"
         with self.assertRaises(ProposalInvalid) as cm:
             parse_proposal(text)
         self.assertIn("claim ids missing; references unresolved", str(cm.exception))
 
     def test_a2_only_derived_from_unresolved_is_invalid(self):
-        o = _real_shape()
+        o = _no_ids(_real_shape())
         o["claims"] = [o["claims"][0], o["claims"][4]]        # FACT + INFERENCE only
         with self.assertRaises(ProposalInvalid):
             parse_proposal(json.dumps(o))
@@ -80,7 +88,7 @@ class E34ClaimIdTests(unittest.TestCase):
         self.assertEqual(r.values["net"], "35.00")
 
     def test_missing_ids_without_references_unchanged(self):
-        o = _real_shape()
+        o = _no_ids(_real_shape())
         o["claims"] = o["claims"][:3]                          # no CALC, no INFERENCE
         _, _, _, claims = parse_proposal(json.dumps(o))
         self.assertEqual([c.claim_id for c in claims], ["c_00", "c_01", "c_02"])
@@ -104,6 +112,53 @@ class E34ClaimIdTests(unittest.TestCase):
         self.assertIn("Every claim must have a claim_id: c_00, c_01, … in the order of the "
                       "claims list. calc.inputs.*.source and derived_from must use exactly these ids.",
                       SYSTEM_PROMPT)
+
+    # --- E34b: "id" / "claim" aliases, duplicates, unresolved references ---
+
+    def test_e34b_a_id_alias_parses_and_calc_ok(self):
+        o = _real_shape()
+        o["claims"][1]["claim"] = o["claims"][1].pop("text")   # real shape: "claim", not "text"
+        _, _, _, claims = parse_proposal(json.dumps(o))
+        self.assertEqual([c.claim_id for c in claims], ["FACT_1", "USER_1", "USER_2", "CALC_1", "INF_1"])
+        self.assertEqual(claims[1].text, "Job price is 40 USD")
+        by_id = {c.claim_id: c for c in claims}
+        ev = {"FACT_1": Evidence("FACT_1", EvidenceState.VERIFIED, Reason.EXACT_MATCH)}
+        r = run_calc(by_id["CALC_1"], by_id, ev)
+        self.assertEqual(r.status, "OK", r.detail)
+        self.assertEqual(r.values["net"], "35.00")
+
+    def test_e34b_b_duplicate_ids_invalid(self):
+        o = _real_shape()
+        o["claims"][2]["id"] = "USER_1"
+        with self.assertRaises(ProposalInvalid) as cm:
+            parse_proposal(json.dumps(o))
+        self.assertIn("duplicate claim ids", str(cm.exception))
+        o = _real_shape()
+        o["claims"][0]["claim_id"] = "c_01"
+        o["claims"][1]["claim_id"] = "c_01"
+        with self.assertRaises(ProposalInvalid):
+            parse_proposal(json.dumps(o))
+
+    def test_e34b_c_id_with_unresolved_reference_invalid(self):
+        o = _real_shape()
+        o["claims"][3]["calc"]["inputs"]["cost"]["source"] = "USER_9"
+        with self.assertRaises(ProposalInvalid) as cm:
+            parse_proposal(json.dumps(o))
+        self.assertIn("unresolved claim references: USER_9", str(cm.exception))
+        o = _real_shape()
+        for c in o["claims"]:
+            c["claim_id"] = c.pop("id")
+        o["claims"][4]["derived_from"].append("FACT_7")
+        with self.assertRaises(ProposalInvalid) as cm:
+            parse_proposal(json.dumps(o))
+        self.assertIn("FACT_7", str(cm.exception))
+
+    def test_e34b_empty_id_not_used(self):
+        o = _no_ids(_real_shape())
+        o["claims"] = o["claims"][:3]
+        o["claims"][0]["id"] = ""
+        _, _, _, claims = parse_proposal(json.dumps(o))
+        self.assertEqual(claims[0].claim_id, "c_00")
 
     def test_c_gate_hash_unchanged(self):
         self.assertEqual(holdout.decision_code_sha256(), GATE_SHA)

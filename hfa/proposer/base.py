@@ -98,6 +98,12 @@ def parse_proposal(text: str) -> tuple[Verdict, Optional[KillClass], str, list[C
     for i, c in enumerate(obj.get("claims") or []):
         if not isinstance(c, dict):
             raise ProposalInvalid(f"claim {i} is not an object")
+        # E34b: real models write their id under "id" and the text under
+        # "claim"; take them as claim_id / text when those are absent.
+        if "claim_id" not in c and isinstance(c.get("id"), str) and c["id"]:
+            c["claim_id"] = c["id"]
+        if "text" not in c and isinstance(c.get("claim"), str):
+            c["text"] = c["claim"]
         if "claim_id" not in c:
             ids_missing = True
         c.setdefault("claim_id", f"c_{i:02d}")
@@ -114,6 +120,13 @@ def parse_proposal(text: str) -> tuple[Verdict, Optional[KillClass], str, list[C
         # use its own names; the c_NN ids assigned above cannot match them.
         # No guessed mapping: the proposal is invalid, visibly.
         raise ProposalInvalid("claim ids missing; references unresolved")
+    ids = [c.claim_id for c in claims]
+    if len(set(ids)) != len(ids):
+        raise ProposalInvalid("duplicate claim ids")
+    unresolved = _unresolved_refs(claims)
+    if unresolved:
+        # E34b: a reference to an id that no claim has, whoever named the ids.
+        raise ProposalInvalid(f"unresolved claim references: {', '.join(map(str, unresolved))}")
     return Verdict(obj["decision"]), kill, str(obj.get("rationale", "")), claims
 
 
@@ -122,7 +135,8 @@ def _unresolved_refs(claims) -> list[str]:
     ids = {c.claim_id for c in claims}
     refs = []
     for c in claims:
-        refs.extend(c.derived_from or [])
+        df = c.derived_from or []
+        refs.extend([df] if isinstance(df, str) else df)
         inputs = (c.calc or {}).get("inputs") if isinstance(c.calc, dict) else None
         if isinstance(inputs, dict):
             refs.extend(inp.get("source") for inp in inputs.values() if isinstance(inp, dict))
