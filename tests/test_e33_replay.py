@@ -75,6 +75,8 @@ class ReplayTests(unittest.TestCase):
         return "runs/real/eval_anthropic_claude-haiku-4-5.json"
 
     def _replay(self, path, *extra):
+        # E37: the run records names only; files outside the repo come from the CLI
+        extra = extra or ("--cases", "cases.jsonl", "--snapshots", "snaps")
         with no_llm():
             return evalrun.main(["--replay", path, *extra])
 
@@ -91,7 +93,7 @@ class ReplayTests(unittest.TestCase):
         x2 = next(r for r in run["rows"] if r["id"] == "X2")
         self.assertEqual(x2["claims_parsed"][0]["quote"], RULE)          # full quote, not truncated
         self.assertEqual(x2["claims_parsed"][0]["polarity"], "CONTRADICTS")
-        self.assertEqual(run["summary"]["replay_inputs"]["snapshots"], os.path.abspath("snaps"))
+        self.assertEqual(run["summary"]["replay_inputs"]["snapshots"], "snaps")           # E37: name only
 
     def test_replay_of_mock_run_gives_the_same_decision_for_every_case(self):
         path = self._mock_run()
@@ -103,7 +105,7 @@ class ReplayTests(unittest.TestCase):
         with open(path) as f:
             run = json.load(f)
         with no_llm():
-            rows, diffs, _ = evalrun.replay_rows(run)
+            rows, diffs, _ = evalrun.replay_rows(run, "cases.jsonl", "snaps")
         self.assertEqual(diffs, [])
         self.assertEqual([(r["id"], r["verifier"], r["kill_class"]) for r in rows],
                          [(r["id"], r["verifier"], r["kill_class"]) for r in run["rows"]])
@@ -124,7 +126,7 @@ class ReplayTests(unittest.TestCase):
         with open("tampered.json", "w") as f:
             json.dump(run, f)
         with no_llm():
-            _, diffs, _ = evalrun.replay_rows(run)
+            _, diffs, _ = evalrun.replay_rows(run, "cases.jsonl", "snaps")
         self.assertTrue(diffs)
         self.assertTrue(all(d.startswith("X1:") for d in diffs))
         self.assertTrue(any("claims_parsed" in d and "CONTRADICTS" in d for d in diffs))

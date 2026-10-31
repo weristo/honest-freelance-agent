@@ -385,10 +385,35 @@ def main(argv: Optional[list[str]] = None) -> int:
     return 0
 
 
+REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
+def _portable(path: str) -> str:
+    """E37: no absolute local path in a run file or the holdout lock. Inside the
+    repository: the repo-relative path; outside: the file or directory name only."""
+    full = os.path.abspath(path)
+    rel = os.path.relpath(full, REPO_ROOT)
+    if rel == os.pardir or rel.startswith(os.pardir + os.sep):
+        return os.path.basename(full.rstrip(os.sep))
+    return rel.replace(os.sep, "/")
+
+
 def replay_inputs(cases_path: str, holdout: bool, a) -> dict:
-    """What `--replay` needs to rebuild the same inputs (E33). Paths only."""
-    return {"cases": os.path.abspath(cases_path), "holdout": holdout, "live": bool(a.live),
-            "snapshots": None if a.live else os.path.abspath(a.snapshots)}
+    """What `--replay` needs to rebuild the same inputs (E33): portable names
+    plus the cases file hash (E37). A file outside the repository is given to
+    the replay with --cases / --snapshots."""
+    return {"cases": _portable(cases_path), "cases_sha256": holdout_mod.file_sha256(cases_path),
+            "holdout": holdout, "live": bool(a.live),
+            "snapshots": None if a.live else _portable(a.snapshots)}
+
+
+def _recorded_path(p: Optional[str]) -> Optional[str]:
+    """A path from replay_inputs: absolute (runs before E37) as is, relative
+    resolved against the repository; None if it does not exist."""
+    if not p:
+        return None
+    full = p if os.path.isabs(p) else os.path.join(REPO_ROOT, p)
+    return full if os.path.exists(full) else None
 
 
 # --- model-free replay (E33) ---------------------------------------------------
@@ -413,12 +438,16 @@ def replay_rows(run: dict, cases_path: Optional[str] = None,
     inputs = (run.get("summary") or {}).get("replay_inputs") or {}
     if inputs.get("live"):
         raise ReplayError("this run fetched sources live; there is no snapshot to replay against")
-    cases_path = cases_path or inputs.get("cases")
-    snapshots = snapshots or inputs.get("snapshots")
+    cases_path = cases_path or _recorded_path(inputs.get("cases"))
+    snapshots = snapshots or _recorded_path(inputs.get("snapshots"))
     if not cases_path or not snapshots:
-        raise ReplayError("the run does not record its cases file / snapshot dir; pass --cases and --snapshots")
+        raise ReplayError(f"cases file {inputs.get('cases')!r} / snapshot dir {inputs.get('snapshots')!r} "
+                          "not found from the run record; pass --cases and --snapshots")
     if not os.path.isdir(snapshots):
         raise ReplayError(f"snapshot dir {snapshots!r} not found")
+    want = inputs.get("cases_sha256")
+    if want and holdout_mod.file_sha256(cases_path) != want:
+        raise ReplayError(f"cases file {cases_path!r} does not match the run's cases_sha256 {want[:12]}...")
     cases = holdout_mod.load_holdout(cases_path) if inputs.get("holdout") else load_cases(cases_path)
     by_id = {c["id"]: c for c in cases}
     out, diffs, notes = [], [], []
