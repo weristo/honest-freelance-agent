@@ -1,0 +1,1 @@
+E36 (002 decision 2026-10-31): p7 superseded by p8 — exact calc subschema in OUTPUT_SCHEMA + one check sentence; p7 3×T results (T1, T2; T3 not run) kept and reported
