@@ -37,7 +37,7 @@ class P4PromptTests(unittest.TestCase):
             self.assertIn(s, P.SYSTEM_PROMPT)
 
     def test_version_and_hash(self):
-        self.assertEqual(P.PROMPT_VERSION, "p7")                      # p4 rules kept in p5, p6, p7
+        self.assertEqual(P.PROMPT_VERSION, "p8")                      # p4 rules kept in p5, p6, p7, p8
         self.assertNotEqual(P.prompt_sha256()[:12], "76c1edb661b0")   # p3
         self.assertEqual(len(P.prompt_sha256()), 64)
 

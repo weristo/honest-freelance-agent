@@ -39,9 +39,10 @@ class E35SchemaInPromptTests(unittest.TestCase):
         self.assertTrue(P.SYSTEM_PROMPT.endswith(
             json.dumps(P.OUTPUT_SCHEMA, sort_keys=True, ensure_ascii=False)))
 
-    def test_b_p7_hash(self):
-        self.assertEqual(P.PROMPT_VERSION, "p7")
-        self.assertEqual(P.prompt_sha256(), P7_SHA)
+    def test_b_p7_superseded(self):
+        # E36: p8 keeps the E35 schema-in-prompt rule; the p8 hash is pinned in test_e36
+        self.assertEqual(P.PROMPT_VERSION, "p8")
+        self.assertNotEqual(P.prompt_sha256(), P7_SHA)
 
     def test_c_gate_hash_unchanged(self):
         self.assertEqual(holdout.decision_code_sha256(), GATE_SHA)

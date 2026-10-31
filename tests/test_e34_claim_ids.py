@@ -108,7 +108,7 @@ class E34ClaimIdTests(unittest.TestCase):
         self.assertEqual(claims[1].claim_id, "USER_1")
 
     def test_prompt_p6_sentence(self):
-        self.assertEqual(PROMPT_VERSION, "p7")                 # p6 sentence kept in p7 (E35)
+        self.assertEqual(PROMPT_VERSION, "p8")                 # p6 sentence kept in p7, p8 (E35, E36)
         self.assertIn("Every claim must have a claim_id: c_00, c_01, … in the order of the "
                       "claims list. calc.inputs.*.source and derived_from must use exactly these ids.",
                       SYSTEM_PROMPT)

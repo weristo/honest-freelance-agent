@@ -195,8 +195,8 @@ class DemoTraceTests(unittest.TestCase):
 
 class E33InvariantTests(unittest.TestCase):
     def test_prompt_hash_unchanged(self):
-        # E34: p6 replaced p5 (920ca988b05c); E35: p7 replaced p6 (0445563f7cee).
-        self.assertTrue(prompt_sha256().startswith("1569d5ed153d"))
+        # E34: p6 replaced p5 (920ca988b05c); E35: p7 replaced p6 (0445563f7cee); E36: p8 replaced p7 (1569d5ed153d).
+        self.assertTrue(prompt_sha256().startswith("de5c1191515c"))
 
     def test_raw_output_paths_are_git_ignored(self):
         try:

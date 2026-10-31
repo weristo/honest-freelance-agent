@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 
-PROMPT_VERSION = "p7"
+PROMPT_VERSION = "p8"
 
 SYSTEM_PROMPT = """You are the proposer in an honest freelance agent.
 You read a freelance opportunity (or a quote / invoice step) and the platform
@@ -37,6 +37,7 @@ Rules:
   "RULE_VIOLATION"}. Expressions may use only numbers, names, + - * / ( ),
   max() and min(). Every input must come from a FACT quote or a USER_ATTESTED
   claim and its literal must appear there verbatim (e.g. "10%", "$5.00").
+  Both sides of check are names defined in inputs or steps, never numbers.
 - Every claim must have a claim_id: c_00, c_01, … in the order of the claims list. calc.inputs.*.source and derived_from must use exactly these ids.
 - If you cannot find a quotable source, say so: decision "NEEDS_HUMAN".
 - If a number you need is not in the request or a source, do not guess it: decision NEEDS_HUMAN.
@@ -67,7 +68,34 @@ OUTPUT_SCHEMA = {
                     "rule_topic": {"type": "string"},
                     "polarity": {"enum": ["SUPPORTS", "CONTRADICTS"]},
                     "derived_from": {"type": "array", "items": {"type": "string"}},
-                    "calc": {"type": "object"},
+                    # p8 (E36): the calc contract as hfa/calc.py reads it.
+                    "calc": {
+                        "type": "object",
+                        "additionalProperties": False,
+                        "required": ["inputs", "steps", "check", "on_fail"],
+                        "properties": {
+                            "inputs": {
+                                "type": "object",
+                                "additionalProperties": {
+                                    "type": "object",
+                                    "additionalProperties": False,
+                                    "required": ["literal", "source"],
+                                    "properties": {"literal": {"type": "string"},
+                                                   "source": {"type": "string"}},
+                                },
+                            },
+                            "steps": {"type": "array",
+                                      "items": {"type": "array", "minItems": 2, "maxItems": 2,
+                                                "items": {"type": "string"}}},
+                            "claimed": {"type": "object",
+                                        "additionalProperties": {"type": ["number", "string"]}},
+                            "check": {"type": "array", "minItems": 3, "maxItems": 3,
+                                      "prefixItems": [{"type": "string"},
+                                                      {"enum": [">=", "<=", ">", "<"]},
+                                                      {"type": "string"}]},
+                            "on_fail": {"enum": ["NOT_WORTH", "RULE_VIOLATION"]},
+                        },
+                    },
                 },
             },
         },

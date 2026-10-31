@@ -21,7 +21,7 @@ class P5PromptTests(unittest.TestCase):
         self.assertIn('polarity: exactly "SUPPORTS" or "CONTRADICTS", no other value. A background '
                       'fact that neither supports nor contradicts the plan: polarity "SUPPORTS" and '
                       'critical false.', P.SYSTEM_PROMPT)
-        self.assertEqual(P.PROMPT_VERSION, "p7")                      # p5 rules kept in p6, p7 (E34, E35)
+        self.assertEqual(P.PROMPT_VERSION, "p8")                      # p5 rules kept in p6, p7, p8 (E34, E35, E36)
         self.assertNotEqual(P.prompt_sha256()[:12], "ffe4dedf69fa")   # p4
 
     def test_neutral_polarity_still_a_visible_error(self):
