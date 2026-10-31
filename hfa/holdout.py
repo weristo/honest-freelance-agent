@@ -37,6 +37,7 @@ from datetime import datetime, timezone
 from typing import Optional
 
 from .proposer.prompt import prompt_sha256
+from .redact import redact
 
 PINNED_HOLDOUT_SHA256 = {
     "private": "0b7ae93043edd4693926f8af99b9819d36d6755e5e7b8cf385719fb577394994",
@@ -205,7 +206,7 @@ def finish_run(state: str, summary: Optional[dict] = None, error: Optional[str] 
     if summary is not None:
         rec["summary"] = summary
     if error is not None:
-        rec["error"] = error
+        rec["error"] = redact(error)            # E37b: no local path / IP / mail in the lock
     d = os.path.dirname(lock_path) or "."
     fd, tmp = tempfile.mkstemp(dir=d, prefix=".holdout_lock.", suffix=".tmp")
     with os.fdopen(fd, "w", encoding="utf-8") as f:

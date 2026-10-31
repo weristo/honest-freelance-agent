@@ -69,6 +69,18 @@ class E37PortablePathTests(unittest.TestCase):
             E.replay_rows(self._run(ri), other, self.snaps)
         self.assertIn("cases_sha256", str(cm.exception))
 
+    def test_e2_aborted_error_is_redacted(self):
+        # E37b: the ABORTED lock stores the exception text through redact()
+        lock = os.path.join(self.tmp.name, "HOLDOUT_RUN.json")
+        holdout.start_run({"llm": "test", "n_cases": 1}, lock_path=lock)
+        err = FileNotFoundError(2, "No such file or directory", "/Users/someone/ai-collab/002-cash/prep/x.txt")
+        holdout.finish_run("ABORTED", error=f"{type(err).__name__}: {err}", lock_path=lock)
+        with open(lock, encoding="utf-8") as f:
+            rec = json.load(f)
+        self.assertEqual(rec["state"], "ABORTED")
+        self.assertIn("[PATH]", rec["error"])
+        self.assertNotIn("/Users/", json.dumps(rec))
+
     def test_f_gate_hash_unchanged(self):
         self.assertEqual(holdout.decision_code_sha256(), GATE_SHA)
 
