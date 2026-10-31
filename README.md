@@ -359,7 +359,7 @@ code change before the freezes is logged in
 looking at mock numbers. The earlier mock-only numbers (a stand-in that
 says GO on every trap case) only showed that the pipeline wiring works.
 
-Prompt p7 (E35: the output JSON Schema is now part of the system prompt) is frozen; the results above are p5 runs; p6 runs are in EVAL_CHANGELOG.
+Prompt p8 (E36: the exact calc contract is part of the output JSON Schema; E35 put the schema in the system prompt) is frozen and final; the results above are p5 runs; p6 and p7 runs are in EVAL_CHANGELOG.
 
 ## Known limitations
 
