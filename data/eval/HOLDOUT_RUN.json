@@ -1,0 +1,149 @@
+{
+ "state": "COMPLETE",
+ "started_at": "2026-11-02T17:05:57Z",
+ "llm": "anthropic:claude-haiku-4-5",
+ "n_cases": 11,
+ "prompt_sha256": "de5c1191515cee9c3904b7f3bdfd23b202ed19ad157ecc4781070ad990f8c7fc",
+ "decision_code_sha256": "9bc97c853fe50e1db154d6498e7db0d4751fcb1d72ac2299c5ea636db3be5813",
+ "budget_precheck": {
+  "estimated_usd": 0.171538,
+  "factor": 1.5,
+  "needed_usd": 0.257307,
+  "remaining_daily_usd": 0.66133,
+  "remaining_total_usd": 11.025977
+ },
+ "finished_at": "2026-11-02T17:06:55Z",
+ "ran_at": "2026-11-02T17:06:55Z",
+ "summary": {
+  "llm": "anthropic:claude-haiku-4-5",
+  "is_mock": false,
+  "n_cases": 11,
+  "n_ok": 10,
+  "n_budget_exhausted": 0,
+  "prompt_sha256": "de5c1191515cee9c3904b7f3bdfd23b202ed19ad157ecc4781070ad990f8c7fc",
+  "n_errors": 1,
+  "no_verifier": {
+   "false_go": 2,
+   "false_go_rate": 0.2,
+   "false_kill_count": 0,
+   "deferral_rate": null,
+   "deferral_incl_errors": null,
+   "exact_label_agreement": 2,
+   "kill_refuse_mixups": 0,
+   "labels": {
+    "GO": 2,
+    "NEEDS_HUMAN": 8
+   },
+   "confusion": {
+    "GO": {
+     "GO": 0,
+     "KILL": 0,
+     "REFUSE": 0,
+     "NEEDS_HUMAN": 0,
+     "UNVERIFIED": 0
+    },
+    "KILL": {
+     "GO": 0,
+     "KILL": 0,
+     "REFUSE": 0,
+     "NEEDS_HUMAN": 0,
+     "UNVERIFIED": 0
+    },
+    "REFUSE": {
+     "GO": 0,
+     "KILL": 0,
+     "REFUSE": 0,
+     "NEEDS_HUMAN": 0,
+     "UNVERIFIED": 0
+    },
+    "NEEDS_HUMAN": {
+     "GO": 2,
+     "KILL": 0,
+     "REFUSE": 0,
+     "NEEDS_HUMAN": 2,
+     "UNVERIFIED": 0
+    },
+    "UNVERIFIED": {
+     "GO": 0,
+     "KILL": 0,
+     "REFUSE": 0,
+     "NEEDS_HUMAN": 6,
+     "UNVERIFIED": 0
+    }
+   }
+  },
+  "verifier": {
+   "false_go": 0,
+   "false_go_rate": 0.0,
+   "false_kill_count": 0,
+   "deferral_rate": null,
+   "deferral_incl_errors": null,
+   "exact_label_agreement": 8,
+   "kill_refuse_mixups": 0,
+   "labels": {
+    "UNVERIFIED": 6,
+    "NEEDS_HUMAN": 3,
+    "REFUSE": 1
+   },
+   "confusion": {
+    "GO": {
+     "GO": 0,
+     "KILL": 0,
+     "REFUSE": 0,
+     "NEEDS_HUMAN": 0,
+     "UNVERIFIED": 0
+    },
+    "KILL": {
+     "GO": 0,
+     "KILL": 0,
+     "REFUSE": 0,
+     "NEEDS_HUMAN": 0,
+     "UNVERIFIED": 0
+    },
+    "REFUSE": {
+     "GO": 0,
+     "KILL": 0,
+     "REFUSE": 0,
+     "NEEDS_HUMAN": 0,
+     "UNVERIFIED": 0
+    },
+    "NEEDS_HUMAN": {
+     "GO": 0,
+     "KILL": 0,
+     "REFUSE": 0,
+     "NEEDS_HUMAN": 3,
+     "UNVERIFIED": 1
+    },
+    "UNVERIFIED": {
+     "GO": 0,
+     "KILL": 0,
+     "REFUSE": 1,
+     "NEEDS_HUMAN": 0,
+     "UNVERIFIED": 5
+    }
+   }
+  },
+  "n_non_go": 10,
+  "n_go": 0,
+  "evidence_categories": {
+   "AMBIGUOUS_CONTEXT": 1,
+   "FETCH_BLOCKED": 2,
+   "FETCH_FAILED": 2,
+   "MULTI_MATCH": 1,
+   "NOT_A_FACT": 11,
+   "QUOTE_TOO_SHORT": 3
+  },
+  "n_quote_outside_context": 0,
+  "n_user_unticked": 0,
+  "n_rows_source_thin": 4,
+  "complete": true,
+  "split": "holdout",
+  "replay_inputs": {
+   "cases": "07_holdout_cases.jsonl",
+   "cases_sha256": "0b7ae93043edd4693926f8af99b9819d36d6755e5e7b8cf385719fb577394994",
+   "holdout": true,
+   "live": false,
+   "snapshots": "eval_snapshots"
+  }
+ }
+}
