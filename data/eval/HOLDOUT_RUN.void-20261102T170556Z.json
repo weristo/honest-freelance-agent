@@ -136,10 +136,10 @@
   "complete": true,
   "split": "holdout",
   "replay_inputs": {
-   "cases": "/Users/otto/ai-collab/002-cash/prep/07_holdout_cases.jsonl",
+   "cases": "07_holdout_cases.jsonl",
    "holdout": true,
    "live": false,
-   "snapshots": "/Users/otto/ai-collab/002-cash/prep/eval_snapshots"
+   "snapshots": "eval_snapshots"
   }
  }
 }

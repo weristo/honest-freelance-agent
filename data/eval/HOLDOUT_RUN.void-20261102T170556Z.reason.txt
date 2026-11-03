@@ -1,1 +1,2 @@
 Decision: 002 (eval owner), 2026-10-31. E34-E36 prompt/parse fixes after run 1; both runs reported. The v1 run (p5 920ca988, 2026-10-30, COMPLETE) stays the p5 result.
+Paths in the voided v1 lock replaced by file names before publishing (002, 2026-11-03); earlier commits still contain them.

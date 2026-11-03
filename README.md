@@ -322,44 +322,50 @@ echo "002 decision <date>: <why the run is void, what was seen>" > data/eval/HOL
 
 A voided lock without a (non-empty) reason file blocks the run as well.
 
-### Results (real model, frozen gate + frozen prompt p5)
+### Results (real model, frozen gate + frozen prompt p8)
 
-Model `anthropic:claude-haiku-4-5`; decision code frozen (gate
-`9bc97c85...5813`), proposer prompt frozen (p5, `920ca988...2844`). Every
-run below was replayed from its stored raw model output with `hfa eval
---replay` and gave identical decisions (exit 0).
+Model `anthropic:claude-haiku-4-5`; decision code frozen (gate `9bc97c85...5813`),
+proposer prompt frozen (p8, `de5c1191...c7fc`). Each run was replayed from its stored
+raw model output with `hfa eval --replay` on commit `53755ad` (holdout v2 lock committed in `daadad2`) and gave identical
+decisions (exit 0).
 
-**Dev set, three runs (T1-T3, 2026-10-29):**
+**Dev set, three runs (T1-T3 p8, 2026-11-01/02), 40 cases each:**
 
 | | without verifier | with verifier + gate + CALC |
 |---|---|---|
-| false GO | 3-5 of 33-35 non-GO cases | **0** in all three runs |
-| wrong KILL (of the 5 gold-GO cases) | 0 / 0 / 0 | 0 / 0 / 1 |
-| deferral rate | 41-46 % | 55-63 % |
+| false GO | 5 / 5 / 5 of 35 non-GO cases | **0 / 0 / 0** |
+| wrong KILL (of 5 gold-GO cases) | 0 / 0 / 0 | 1 / 0 / 0 |
+| deferral rate | 41.7 / 37.5 / 39.1 % | 50 / 50 / 47.8 % (T3: 50 % incl. errors) |
+| cases with no decision (model output rejected) | – | 0 / 3 / 1 |
+| GO decisions | – | **0 in every run** |
 
-The one wrong KILL (T3, case T31) comes from the model labelling a neutral
-sentence ("additional terms apply") as CONTRADICTS + critical - a known
-polarity limitation, not tuned away. Errors (no decision, nothing done):
-0-2 per run (T16: model wrote text after the JSON; T21/T30: FACT claim
-without quote and source_url) - safe failures.
+Honest reading: with the real model the verifier has never produced a GO. It removes
+every false GO, but it also defers or rejects the good opportunities. The one wrong
+KILL (T1, case T03) came from the model marking a neutral rules sentence as
+contradicting.
 
-**Holdout (11 cases, run once, 2026-10-30, lock `data/eval/HOLDOUT_RUN.json`
-state `COMPLETE`):** false GO **0/11** with verifier, 1/11 without (R07).
-The holdout contains no gold GO / KILL / REFUSE case (4 NEEDS_HUMAN, 7
-UNVERIFIED), so it does not measure wrong KILLs or the deferral rate.
+CALC claims: T1 0/7, T2 2/8 (+1 not evaluated), T3 0/7 valid. The model keeps writing
+thresholds as numbers inside `check` and makes its own arithmetic errors; the code
+rejects both.
 
-Total model cost of these four runs: about $0.87.
+**Holdout:** v1 (prompt p5, 2026-10-30, replayed exit 0 on the code it ran on, 2026-10-30, before E34b) and v2
+(prompt p8, 2026-11-02, 11 cases, 1 rejected model output): false GO 0/10 with the
+verifier vs 2/10 without; exact label 8/10 vs 2/10; no GO decision. v1 (p5): 0/11 vs
+1/11, exact 4/11 vs 2/11. Both are reported. v1 was voided after the E34-E36 prompt/parse
+fixes. Replaying holdout v1 on later code changes claim-level parsing for R01/R04
+(E34b alias handling); the decisions are unchanged.
+
+**Cost:** all real-model runs including voided ones: 4.02 $ (sum of the per-call cost estimates stored with the 15 real-model runs);
+one p8 dev run ≈ 0.35 $.
 
 **Read this as a small sample, not a benchmark:** 40 + 11 hand-labelled
-cases, one model, one prompt. It shows that the verifier and the gate stop
-false GOs on these cases at the price of more deferrals; it does not show
-how the agent performs on other questions or other models. Every gold or
-code change before the freezes is logged in
-[EVAL_CHANGELOG.md](EVAL_CHANGELOG.md), including the ones made after
-looking at mock numbers. The earlier mock-only numbers (a stand-in that
-says GO on every trap case) only showed that the pipeline wiring works.
-
-Prompt p8 (E36: the exact calc contract is part of the output JSON Schema; E35 put the schema in the system prompt) is frozen and final; the results above are p5 runs; p6 and p7 runs are in EVAL_CHANGELOG.
+cases, one model. It shows that the verifier and the gate stop false GOs on
+these cases, at the price of deferring every good opportunity so far; it does
+not show how the agent performs on other questions or other models. Every
+gold, code and prompt change is logged in [EVAL_CHANGELOG.md](EVAL_CHANGELOG.md),
+including the ones made after looking at results (prompt p5 -> p8, E34-E36).
+The earlier mock-only numbers (a stand-in that says GO on every trap case)
+only showed that the pipeline wiring works.
 
 ## Known limitations
 
